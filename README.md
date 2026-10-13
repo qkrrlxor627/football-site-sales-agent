@@ -56,8 +56,8 @@
 <p align="center"><b>③ 주문한 고객의 첫 화면</b><br>가장 급한 주문부터 먼저 말을 겁니다.</p>
 </td>
 <td width="50%" valign="top">
-<img src="docs/screenshots/05-cs-cardnews.png" alt="반품 요청 처리 과정을 보여주는 카드 4장">
-<p align="center"><b>④ 교환·반품 처리 과정</b><br>문의, 에이전트 논의, 적용 규칙, 결론을 카드 4장으로 보여 줍니다.</p>
+<img src="docs/screenshots/05-cs-cardnews.png" alt="에이전트 논의 대화창과 내려받을 수 있는 접수 메모">
+<p align="center"><b>④ 교환·반품 처리 과정</b><br>에이전트 논의는 대화창으로, 결론은 PNG·JPG로 내려받는 접수 메모로 보여 줍니다.</p>
 </td>
 </tr>
 </table>
@@ -198,6 +198,7 @@ stateDiagram-v2
 | 상품 | 나이키 축구화 29종(Mercurial·Phantom·Tiempo, 스터드 FG·AG·MG·TF·IC). 색상, 정가·할인가를 함께 보여 줍니다. 출처와 확인일은 `docs/product-sources.csv` |
 | 둘러보기 | 머리말의 *전체 축구화*에서 구장·라인·할인으로 걸러 보고 바로 구매합니다. 어느 신발이 내 조건에 안전한지는 상담(규칙)이 판단합니다 |
 | 구장 배경 | 구장을 말하면 무대 배경이 그 구장 사진으로 바뀝니다 (천연잔디, 인조잔디, 풋살장. 흙운동장·실내는 기본 배경) |
+| 접수 메모 | 배송·교환·반품 문의의 결론(문의, 적용 규칙, 결론, 선택지)을 메모지로 보여 주고 PNG·JPG로 저장하거나 글로 복사합니다. 고객 화면에 보인 내용만 담습니다 |
 | 넘어온 건 | 발 건강 언급, 규칙 밖 교환·반품, 맞는 상품 없음이 관리 화면 목록에 쌓입니다. 고객 문장, 적용 규칙, 에이전트 논의(내부 포함)를 함께 봅니다 |
 | 연락처 | 사람에게 넘어간 건이면 고객 화면이 전화번호나 이메일을 묻습니다. 로그인한 고객은 한 번 남기면 다시 묻지 않습니다 |
 | 알림 | `.env`의 `PITCHROOM_NOTIFY_WEBHOOK`에 Slack·Discord 웹훅 주소를 넣으면 넘어온 건과 새 주문을 알려 줍니다. 고객이 쓴 문장은 보내지 않고 종류와 주문 번호만 보냅니다 |
@@ -266,7 +267,8 @@ pitchroom/
 frontend/        Vue 3 + TypeScript + Pinia (Vite). 판단 로직 없음: API가 준 화면 JSON만 그린다
   src/stores/session.ts   화면 상태와 API 호출
   src/stores/admin.ts     관리 화면 상태
-  src/components/         진열대, 상품·주문 카드, CS 카드뉴스, 로그인·가입 패널, 구매 시트, 관리 화면
+  src/memo.ts             접수 메모 내용과 이미지 만들기
+  src/components/         진열대, 상품·주문 카드, CS 대화창·메모, 로그인·가입 패널, 구매 시트, 둘러보기, 관리 화면
 app.py           웹 서버 실행 (uvicorn)
 web/index.html   처음 만든 HTML 데모 (참고용. 판단 로직이 JS로 따로 들어 있어 서버와 다를 수 있음)
 tests/           pytest (그래프 규칙 + HTTP API)

@@ -155,7 +155,8 @@ def result_view(s: dict) -> dict:
         return _view(**common, count={"prefix": "고객 문의 처리 과정", "strong": "", "suffix": ""},
                      shelf={"kind": "news", "blur": 0, "paused": False, "cards": [], "empty_text": None},
                      news={"summary": k["summary"], "rules": k["rules"], "verdict": k["verdict"], "hold": k["verdict"] == "사장님 확인",
-                           "next": k["next"], "options": k.get("options") or [], "discussion": c["discussion"], "hidden": c["hidden"]})
+                           "next": k["next"], "options": k.get("options") or [], "discussion": c["discussion"], "hidden": c["hidden"],
+                           "date": day_iso(0)})   # 내려받는 접수 메모에 찍히는 날짜
 
     if route == "ask" and reason == "cs-info":   # 교환·반품 정보를 묻는 중: 주문이 있으면 그 주문을, 없으면 흐린 진열대를 뒤에 둔다
         if acc and acc["orders"]:

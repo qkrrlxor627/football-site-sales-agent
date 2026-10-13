@@ -88,6 +88,8 @@ def test_login_shows_service_home_and_exchange_updates_order(client):
     done = say(client, "실내에서만 신어봤어요")
     assert done["view"]["news"]["verdict"] == "자동 접수" and not done["view"]["news"]["hold"]
     assert done["view"]["news"]["discussion"] and done["view"]["discussion"] == []   # 논의는 카드뉴스 안에만
+    from pitchroom.data import day_iso
+    assert done["view"]["news"]["date"] == day_iso(0)
     assert done["account"]["orders"][0]["status"] == "교환 접수"
     assert done["account"]["orders"][0]["steps"][-1] == {"text": "교환 접수", "state": "svc"}
 

@@ -72,6 +72,7 @@ export interface News {
   options: string[]
   discussion: Line[]
   hidden: number
+  date: string // 접수 메모에 찍는 날짜 (YYYY-MM-DD)
 }
 
 export interface Handoff {

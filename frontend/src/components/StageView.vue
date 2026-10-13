@@ -47,7 +47,7 @@ async function send(text: string) {
 
     <div class="shelf-wrap">
       <div class="count">{{ view.count.prefix }}<b v-if="view.count.strong">{{ view.count.strong }}</b>{{ view.count.suffix }}</div>
-      <CsNews v-if="view.news" :news="view.news" />
+      <CsNews v-if="view.news" :news="view.news" :echo="view.echo" />
       <div v-else class="shelf" :class="{ paused: view.shelf.paused }" :style="shelfStyle" :inert="view.collect && view.shelf.blur > 0">
         <template v-if="view.shelf.kind === 'products'">
           <ProductCard v-for="c in view.shelf.cards" :key="c.code" :card="c" @buy="s.requestBuy" />
