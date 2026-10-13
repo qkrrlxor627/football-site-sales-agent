@@ -11,3 +11,5 @@ frontend/dist
 tests
 web
 .DS_Store
+docs
+profile.md
