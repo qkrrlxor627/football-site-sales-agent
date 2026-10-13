@@ -140,7 +140,7 @@ async function resolve(id: number) {
           <div class="info">
             <div class="row">
               <b>{{ o.id }}</b>
-              <span class="status" :class="{ svc: ['교환 접수', '반품 접수', '사장님 확인 중'].includes(o.status) }">{{ o.status }}</span>
+              <span class="status" :class="{ svc: ['교환 접수', '반품 접수', '사장님 확인 중', '주문 취소'].includes(o.status) }">{{ o.status }}</span>
               <span class="muted">{{ o.account_name }} ({{ o.account_id }})</span>
             </div>
             <span>{{ o.title }}</span>
@@ -156,7 +156,7 @@ async function resolve(id: number) {
                   <option v-for="x in sizesFor(o)" :key="x.size" :value="x.size" :disabled="x.qty === 0">{{ x.size }}mm{{ x.size === o.size ? ' (지금)' : '' }} · {{ x.qty }}켤레</option>
                 </select>
               </label>
-              <button class="pill-btn" :class="{ dark: a.label !== '요청 거절' }" type="button" :disabled="admin.busy || (a.needs_size && !sizes[o.id])" @click="setStatus(o, a.to, a.needs_size)">{{ a.label }}</button>
+              <button class="pill-btn" :class="{ dark: !['요청 거절', '주문 취소'].includes(a.label) }" type="button" :disabled="admin.busy || (a.needs_size && !sizes[o.id])" @click="setStatus(o, a.to, a.needs_size)">{{ a.label }}</button>
             </template>
           </div>
         </li>

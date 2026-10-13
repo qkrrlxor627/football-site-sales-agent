@@ -61,7 +61,7 @@ ORDER_COLS = ["id", "code", "size", "status", "exchanges", "note", "ordered_at",
 
 # 사장님이 주문을 다음 단계로 넘기는 규칙: 지금 상태 → [(다음 상태, 버튼 이름, 고객에게 보일 안내)]
 TRANSITIONS = {
-    "결제완료": [("배송중", "출고 처리", None)],
+    "결제완료": [("배송중", "출고 처리", None), ("주문 취소", "주문 취소", "주문이 취소됐어요. 결제 금액은 환불돼요.")],
     "배송중": [("배송완료", "배송 완료 처리", None)],
     "교환 접수": [("배송완료", "교환 완료 처리", "교환 상품이 도착했어요.")],
     "반품 접수": [("반품 완료", "반품·환불 완료 처리", "검수가 끝나 환불됐어요.")],
@@ -157,6 +157,10 @@ class Store:
                 acc = make_account(user_id)
                 db.execute("INSERT INTO accounts (id, name, role, created_at) VALUES (?, ?, 'customer', ?)", (acc["id"], acc["name"], now_iso()))
                 for o in acc["orders"]:
+                    if db.execute("SELECT 1 FROM orders WHERE id = ?", (o["id"],)).fetchone():
+                        # 데모를 나중에 켰는데 그 번호를 실제 주문이 이미 쓰고 있다: 다음 번호를 준다
+                        last = db.execute("SELECT MAX(CAST(SUBSTR(id, 4) AS INTEGER)) FROM orders").fetchone()[0] or 0
+                        o = {**o, "id": f"PR-{last + 1:04d}"}
                     db.execute(f"INSERT INTO orders (account_id, {', '.join(ORDER_COLS)}) VALUES (?, {', '.join('?' * len(ORDER_COLS))})",
                                (acc["id"], *[o[c] for c in ORDER_COLS]))
 
@@ -303,7 +307,7 @@ class Store:
                 self._put_back(db, o["code"], o["size"])
                 self._take(db, o["code"], new_size)
                 o["size"] = new_size
-            elif to == "반품 완료":
+            elif to in ("반품 완료", "주문 취소"):   # 팔리지 않게 된 한 켤레는 재고로 돌아온다
                 self._put_back(db, o["code"], o["size"])
             if to == "배송중":
                 o["shipped_at"] = today

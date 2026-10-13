@@ -58,8 +58,8 @@ def product_card(code, profile, label=None, quiet=False, trade=None, buyable=Fal
 def order_card(o, primary=False) -> dict:
     p = BY_CODE[o["code"]]
     svc = o["status"] not in STEP
-    idx = len(STEP) if svc else STEP.index(o["status"])
-    steps = [{"text": s, "state": "done" if i < idx else "now" if i == idx else "todo"} for i, s in enumerate(STEP)]
+    idx = 1 if o["status"] == "주문 취소" else len(STEP) if svc else STEP.index(o["status"])   # 취소는 결제까지만 지나간 것
+    steps = [{"text": s, "state": "done" if i < idx else "now" if i == idx and not svc else "todo"} for i, s in enumerate(STEP)]
     if svc:
         steps.append({"text": o["status"], "state": "svc"})
     when = f'배송 완료 {o["delivered_at"]}' if o["delivered_at"] else f'출고 {o["shipped_at"]}' if o["shipped_at"] else f'주문 {o["ordered_at"]}'
@@ -102,7 +102,7 @@ def _view(**kw) -> dict:
 
 
 def _sorted_orders(acc) -> list[dict]:
-    pri = lambda o: 0 if o["status"] in IN_SERVICE else 1 if o["status"] == "배송중" else 2 if o["status"] == "결제완료" else 4 if o["status"] == "반품 완료" else 3
+    pri = lambda o: 0 if o["status"] in IN_SERVICE else 1 if o["status"] == "배송중" else 2 if o["status"] == "결제완료" else 4 if o["status"] in ("반품 완료", "주문 취소") else 3
     return sorted(acc["orders"], key=lambda o: (pri(o), -date.fromisoformat(o["ordered_at"]).toordinal()))  # 급한 상태 → 최근 주문 순
 
 

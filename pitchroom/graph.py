@@ -360,7 +360,7 @@ def new_thread(user_id: Optional[str] = None) -> dict:
 
 def service_greeting(acc: dict) -> str:
     """이미 주문한 고객의 첫 화면: 가장 급한 주문부터 먼저 말을 건다."""
-    pri = lambda o: 0 if o["status"] in IN_SERVICE else 1 if o["status"] == "배송중" else 2 if o["status"] == "결제완료" else 4 if o["status"] == "반품 완료" else 3
+    pri = lambda o: 0 if o["status"] in IN_SERVICE else 1 if o["status"] == "배송중" else 2 if o["status"] == "결제완료" else 4 if o["status"] in ("반품 완료", "주문 취소") else 3
     os_ = sorted(acc["orders"], key=pri)
     o = os_[0]
     if o["status"] in IN_SERVICE:
@@ -369,6 +369,8 @@ def service_greeting(acc: dict) -> str:
         line = f'{order_label(o)}은 배송 중이에요. 보통 1~2일 안에 도착해요.'
     elif o["status"] == "결제완료":
         line = f'{order_label(o)}은 결제 완료, 출고 준비 중이에요.'
+    elif o["status"] == "주문 취소":
+        line = f'{order_label(o)} 주문은 취소됐어요.'
     elif o["status"] == "반품 완료":
         line = f'{order_label(o)} 반품이 완료됐어요.'
     else:

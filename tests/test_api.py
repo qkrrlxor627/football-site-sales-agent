@@ -264,7 +264,7 @@ def test_new_order_flows_to_delivery_and_then_exchange(db):
         login_admin(owner)
         board = owner.get("/api/admin/board").json()
         mine = next(o for o in board["orders"] if o["id"] == oid)
-        assert mine["account_name"] == "태호" and mine["actions"] == [{"to": "배송중", "label": "출고 처리", "needs_size": False}]
+        assert mine["account_name"] == "태호" and [a["label"] for a in mine["actions"]] == ["출고 처리", "주문 취소"]
         assert owner.post(f"/api/admin/orders/{oid}/status", json={"to": "배송완료"}).json()["error"]["code"] == "bad_transition"   # 단계를 건너뛸 수 없다
         owner.post(f"/api/admin/orders/{oid}/status", json={"to": "배송중"})
         assert "배송 중" in say(shopper, "언제 와요?")["view"]["headline"]         # 고객 답변이 바뀐 상태를 바로 따른다
@@ -512,3 +512,93 @@ def test_owner_issues_a_temporary_password(db):
         assert shopper.post("/api/login", json={"user_id": "taeho", "password": temp}).status_code == 200
         for other in ["admin", "jiwoo", "nobody"]:   # 관리자·데모 계정·없는 계정은 안 된다
             assert owner.post(f"/api/admin/customers/{other}/reset-password").status_code == 404
+
+
+# ---------- 케이스별 연습 계정: 안내문에 적은 '해 볼 말 ⇒ 결과'가 실제로 그렇게 나오는지 ----------
+@pytest.fixture
+def cases(db):
+    from pitchroom import sample
+    pw = sample.main(db, quiet=True)
+    app = app_with(db)
+
+    def as_user(user_id):
+        c = TestClient(app)
+        r = c.post("/api/login", json={"user_id": user_id, "password": pw})
+        assert r.status_code == 200, user_id
+        return c, r.json()
+    return as_user
+
+
+@pytest.mark.parametrize("user, turns, route, reason, expect", [
+    ("c_paid", ["언제 와요?"], "cs", "ship", "출고 준비 중"),
+    ("c_paid", ["교환하고 싶어요"], "cs", "no-order", "배송 완료된 주문이 아직 없어요"),
+    ("c_shipping", ["어디쯤이에요?"], "cs", "ship", "배송 중"),
+    ("c_exchange", ["사이즈가 작아요", "실내에서만 신어봤어요"], "cs", "auto", "교환 접수 완료"),
+    ("c_return", ["반품하고 싶어요", "안 신었어요"], "cs", "auto", "반품 접수 완료"),
+    ("c_worn", ["교환하고 싶어요", "경기 뛰었어요"], "escalate", "policy", "사장님이 확인 중"),
+    ("c_late", ["교환하고 싶어요"], "escalate", "policy", "사장님이 확인 중"),
+    ("c_again", ["사이즈가 작아요", "안 신었어요"], "escalate", "policy", "사장님이 확인 중"),
+    ("c_exchanging", ["교환하고 싶어요"], "cs", "status", "교환 접수"),
+    ("c_returning", ["반품 어떻게 됐어요?"], "cs", "status", "반품 접수"),
+    ("c_waiting", ["교환 어떻게 됐어요?"], "cs", "status", "사장님 확인 중"),
+    ("c_cancelled", ["언제 와요?"], "cs", "ship", "진행 중인 배송은 없어요"),
+    ("c_many", ["언제 와요?"], "cs", "ship", "출고 준비 중"),
+    ("c_many", ["교환하고 싶어요"], "cs", "status", "교환 접수"),
+    ("c_new", ["인조잔디에서 뛰어요", "발볼 넓어요", "20만원"], "recommend", None, "Tiempo"),
+])
+def test_case_account_behaves_as_documented(cases, user, turns, route, reason, expect):
+    c, _ = cases(user)
+    for t in turns:
+        view = say(c, t)["view"]
+    assert (view["route"], view["reason"]) == (route, reason)
+    assert expect in view["headline"]
+
+
+def test_case_accounts_first_screens_and_admin_side(cases):
+    assert "반품이 완료됐어요" in cases("c_returned")[1]["view"]["headline"]
+    cancelled = cases("c_cancelled")[1]
+    assert "주문은 취소됐어요" in cancelled["view"]["headline"]
+    assert [s["state"] for s in cancelled["account"]["orders"][0]["steps"]] == ["done", "todo", "todo", "svc"]
+    many = cases("c_many")[1]
+    assert len(many["account"]["orders"]) == 4 and many["view"]["shelf"]["cards"][0]["status"] == "교환 접수"   # 가장 급한 주문부터
+    assert cases("c_new")[1]["view"]["screen"] == "shop"
+    c, _ = cases("c_late")
+    assert say(c, "교환하고 싶어요")["view"]["contact"] == {"saved": None}   # 연락처가 없는 고객에게는 묻는다
+
+    owner = TestClient(c.app)
+    login_admin(owner)
+    board = owner.get("/api/admin/board").json()
+    assert {o["status"] for o in board["orders"]} >= {"결제완료", "배송중", "배송완료", "교환 접수", "반품 접수", "사장님 확인 중", "반품 완료", "주문 취소"}
+    kinds = sorted(h["kind"] for h in board["handoffs"])
+    assert kinds == ["empty", "health", "health", "policy", "policy"]          # 연습 3건 + c_waiting + 방금 c_late
+    paid = next(o for o in board["orders"] if o["account_id"] == "c_paid")
+    before = stock_of(board, "S-05")[265]
+    board = owner.post(f'/api/admin/orders/{paid["id"]}/status', json={"to": "주문 취소"}).json()
+    assert next(o for o in board["orders"] if o["id"] == paid["id"])["status"] == "주문 취소"
+    assert stock_of(board, "S-05")[265] == before + 1                            # 취소한 한 켤레는 재고로
+
+
+def test_rerunning_sample_resets_cases_and_keeps_stock_and_real_customers(db):
+    from pitchroom import sample
+    from pitchroom.store import Store
+    with TestClient(create_app(db)) as c:
+        c.post("/api/signup", json={"user_id": "taeho", "name": "태호", "password": "correct-horse"})
+        c.post("/api/orders", json={"code": "S-05", "size": 270})
+    sample.main(db, quiet=True)
+    first = Store(db).stock_map()
+    Store(db).transition_order(Store(db).get_account("c_shipping")["orders"][0]["id"], "배송완료")   # 케이스를 써 버린 뒤
+    sample.main(db, quiet=True)                                                                         # 다시 돌리면
+    assert Store(db).get_account("c_shipping")["orders"][0]["status"] == "배송중"                       # 처음 상태로
+    assert Store(db).stock_map() == first                                                               # 재고도 그대로
+    assert len(Store(db).get_account("taeho")["orders"]) == 1                                           # 가입한 고객은 그대로
+
+
+def test_turning_demo_on_later_does_not_collide_with_real_orders(db):
+    with TestClient(app_with(db, demo=False)) as c:        # 운영 설정으로 먼저 쓰다가
+        c.post("/api/signup", json={"user_id": "taeho", "name": "태호", "password": "correct-horse"})
+        assert c.post("/api/orders", json={"code": "S-05", "size": 270}).json()["order_id"] == "PR-0001"
+    with TestClient(app_with(db, demo=True)) as c:         # 나중에 데모를 켜도 뜬다
+        ids = [o["id"] for o in c.post("/api/login", json={"user_id": "minsu"}).json()["account"]["orders"]]
+        assert ids and "PR-0001" not in ids
+        taeho = c.post("/api/login", json={"user_id": "taeho", "password": "correct-horse"}).json()["account"]
+        assert [o["id"] for o in taeho["orders"]] == ["PR-0001"]

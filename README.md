@@ -24,6 +24,7 @@ make docker    # Docker로 실행 (운영 설정): http://127.0.0.1:8000
 | Docker 실행 / 로그 / 중지 | `make docker` / `make docker-logs` / `make docker-down` |
 | 테스트 (pytest + 타입 검사 + vitest) | `make test` |
 | 데모 계정·주문 처음 상태로 | `make reset-demo` |
+| 케이스별 연습 계정 만들기·되돌리기 | `make sample` (Docker: `make docker-sample`) |
 | 터미널에서 대화 | `python -m pitchroom.cli` / `--user jiwoo` |
 | 데모 대화 출력 | `python -m pitchroom.demo` |
 | 평가 (MVP vs 개선) | `python -m pitchroom.evaluation` |
@@ -47,6 +48,8 @@ make docker    # Docker로 실행 (운영 설정): http://127.0.0.1:8000
 - **연락처**: 사람에게 넘어간 건이면 고객 화면이 전화번호나 이메일을 묻습니다. 로그인한 고객은 한 번 남기면 다음부터 묻지 않습니다.
 - **알림**: `.env`의 `PITCHROOM_NOTIFY_WEBHOOK`에 Slack·Discord 웹훅 주소를 넣으면 넘어온 건과 새 주문을 알려 줍니다. 고객이 쓴 문장은 보내지 않고 종류와 주문 번호만 보냅니다.
 - **비밀번호**: 고객은 *내 주문* 패널에서 바꿀 수 있고, 잊었으면 사장님이 관리 화면 *고객* 탭에서 임시 비밀번호를 만들어 전해 줍니다.
+- **연습 계정**: `make sample`은 상황 하나에 계정 하나(`c_paid` 결제완료, `c_shipping` 배송중, `c_late` 교환 기한 지남, `c_cancelled` 주문 취소 등 14개)를 만들고, 계정별 '해 볼 말 ⇒ 결과'와 공통 비밀번호를 출력합니다. 다시 실행하면 연습 계정만 처음 상태로 되돌립니다.
+- **주문 취소**: 출고 전(결제완료) 주문은 관리 화면에서 취소할 수 있고 재고가 돌아옵니다. 고객이 대화로 직접 취소하는 기능은 없습니다.
 - 데모 주문 날짜는 만든 날 기준이라, 며칠 지나 교환 기한 시나리오가 달라지면 `make reset-demo`로 다시 만드세요 (가입한 고객과 그 주문은 그대로 둡니다).
 
 ## 운영 설정
