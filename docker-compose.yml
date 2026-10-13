@@ -1,0 +1,26 @@
+# 실행: docker compose up -d --build   →  http://127.0.0.1:8000
+# 키와 관리자 비밀번호는 .env에서 읽는다 (.env.example 참고). 대화·계정·주문은 pitchroom-data 볼륨에 남는다.
+services:
+  pitchroom:
+    build: .
+    image: pitchroom:local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PITCHROOM_PORT:-8000}:8000"   # 내 컴퓨터에서만 열린다. 밖에 공개할 때는 앞에 HTTPS 프록시를 둔다
+    environment:
+      PITCHROOM_ENV: production
+      TZ: ${TZ:-Asia/Seoul}                                   # 주문·교환 기한 날짜를 이 시간대로 센다
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      PITCHROOM_MODEL: ${PITCHROOM_MODEL:-gpt-4o-mini}
+      PITCHROOM_SECRET: ${PITCHROOM_SECRET:-}
+      PITCHROOM_ADMIN_ID: ${PITCHROOM_ADMIN_ID:-admin}
+      PITCHROOM_ADMIN_PASSWORD: ${PITCHROOM_ADMIN_PASSWORD:-}
+      PITCHROOM_DEMO: ${PITCHROOM_DEMO:-0}                    # 1이면 비밀번호 없는 데모 계정 4개를 켠다
+      PITCHROOM_COOKIE_SECURE: ${PITCHROOM_COOKIE_SECURE:-0}  # HTTPS 뒤에 둘 때 1
+      PITCHROOM_LOG_LEVEL: ${PITCHROOM_LOG_LEVEL:-INFO}
+    volumes:
+      - pitchroom-data:/data
+
+volumes:
+  pitchroom-data:

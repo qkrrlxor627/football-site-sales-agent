@@ -1,0 +1,10 @@
+# 서버 실행에 필요한 것만 (Docker 이미지도 이 파일만 설치한다). 개발·평가·테스트용은 requirements-dev.txt
+langgraph>=0.2
+langgraph-checkpoint-sqlite>=2
+langchain-openai>=0.2
+tavily-python>=0.5
+pydantic>=2
+fastapi>=0.115
+uvicorn[standard]>=0.30
+itsdangerous>=2
+python-dotenv>=1.0
