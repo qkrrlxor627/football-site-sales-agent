@@ -43,4 +43,6 @@ class Settings:
     ip_per_minute: int = field(default_factory=lambda: int(os.getenv("PITCHROOM_IP_PER_MINUTE", "120")))      # 주소 하나당 (대화·주문)
     auth_per_minute: int = field(default_factory=lambda: int(os.getenv("PITCHROOM_AUTH_PER_MINUTE", "10")))   # 주소 하나당 로그인·가입 시도
     thread_days: int = field(default_factory=lambda: int(os.getenv("PITCHROOM_THREAD_DAYS", "30")))           # 이만큼 쉬는 대화는 지운다
+    session_days: int = field(default_factory=lambda: int(os.getenv("PITCHROOM_SESSION_DAYS", "30")))        # 로그인 유지 최대 기간
+    session_idle_days: int = field(default_factory=lambda: int(os.getenv("PITCHROOM_SESSION_IDLE_DAYS", "14")))  # 이만큼 안 쓰면 다시 로그인
     notify_webhook: Optional[str] = field(default_factory=lambda: os.getenv("PITCHROOM_NOTIFY_WEBHOOK") or None)  # 넘어온 건·새 주문 알림 (Slack·Discord 웹훅)

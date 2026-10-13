@@ -27,6 +27,7 @@ class Extracted(BaseModel):
     style_line: Optional[Literal["Mercurial", "Phantom", "Tiempo"]] = Field(None, description="취향·선수 스타일에 가장 가까운 나이키 라인")
     style_why: Optional[str] = Field(None, description="15자 이내 이유")
     health_flag: bool = Field(False, description="발·발목 통증, 부상, 수술, 질환 언급이면 true")
+    wants_new_order: bool = Field(False, description="새로 사거나 추가로 주문·재구매하고 싶다고 하면 true (교환·반품·배송 문의는 false)")
     cs: CsInfo = Field(default_factory=CsInfo)
     other_requests: list[str] = Field(default_factory=list, description="매장 규칙으로 다루지 않는 요청 (예: 골키퍼용, 방수)")
 
@@ -91,6 +92,8 @@ def keyword_extract(text: str) -> Extracted:
         if re.search(pat, t, re.I):
             e.brand = brand
     e.health_flag = any(w in t for w in RED_FLAGS)
+    # "주문 추가로 하고 싶어", "하나 더 살게요", "같은 걸로 또 주문" 같은 말: 배송·교환 문의가 아니라 새 주문이다
+    e.wants_new_order = bool(re.search(r"추가.{0,8}(주문|구매|사고|살)|(주문|구매).{0,8}추가|(하나|한\s*켤레|한\s*개|또|더|다시|새로).{0,6}(주문|구매|사고|살게|살래|사려)|재주문|재구매", t))
     if re.search(r"배송|언제\s*와|도착|출고|택배|어디쯤", t):
         e.intent = "배송"
     elif re.search(r"반품|환불", t):

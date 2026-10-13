@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS handoffs (
 );
 CREATE INDEX IF NOT EXISTS handoffs_status ON handoffs(status);
 CREATE TABLE IF NOT EXISTS threads (thread_id TEXT PRIMARY KEY, last_seen TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, last_seen TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
 CREATE TABLE IF NOT EXISTS products (code TEXT PRIMARY KEY, price INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS stock (code TEXT NOT NULL, size INTEGER NOT NULL, qty INTEGER NOT NULL, PRIMARY KEY (code, size));
 """
@@ -226,6 +228,49 @@ class Store:
         if row["password_hash"] is None:
             return allow_passwordless and user_id in DEMO_ACCOUNTS
         return bool(password) and check_password(password, row["password_hash"])
+
+    # ---------- 로그인 세션 ----------
+    # 쿠키에는 무작위 토큰만 들어 있고, 누구의 세션인지는 여기서 정한다.
+    # 그래서 로그아웃·비밀번호 변경 때 서버에서 세션을 지우면 복사해 둔 쿠키도 그 자리에서 못 쓰게 된다.
+    @staticmethod
+    def _token_hash(token: str) -> str:
+        return hashlib.sha256(token.encode()).hexdigest()   # 토큰 원문은 DB에 두지 않는다
+
+    def create_session(self, user_id: str) -> str:
+        token = secrets.token_urlsafe(32)
+        with self._tx() as db:
+            db.execute("INSERT INTO sessions (token_hash, user_id, created_at, last_seen) VALUES (?, ?, ?, ?)", (self._token_hash(token), user_id, now_iso(), now_iso()))
+        return token
+
+    def session_user(self, token: str, max_days: int, idle_days: int) -> Optional[str]:
+        """세션이 살아 있으면 아이디를 돌려준다. 만든 지 max_days가 지났거나 idle_days 동안 쓰지 않았으면 끝난 세션이다."""
+        h, now = self._token_hash(token), datetime.now()
+        with self._tx() as db:
+            row = db.execute("SELECT user_id, created_at, last_seen FROM sessions WHERE token_hash = ?", (h,)).fetchone()
+            if not row:
+                return None
+            seen = datetime.fromisoformat(row["last_seen"])
+            if now - datetime.fromisoformat(row["created_at"]) > timedelta(days=max_days) or now - seen > timedelta(days=idle_days):
+                db.execute("DELETE FROM sessions WHERE token_hash = ?", (h,))
+                return None
+            if now - seen > timedelta(minutes=5):   # 요청마다 쓰지 않도록 5분에 한 번만 갱신
+                db.execute("UPDATE sessions SET last_seen = ? WHERE token_hash = ?", (now_iso(), h))
+            return row["user_id"]
+
+    def delete_session(self, token: str) -> None:
+        with self._tx() as db:
+            db.execute("DELETE FROM sessions WHERE token_hash = ?", (self._token_hash(token),))
+
+    def delete_user_sessions(self, user_id: str, keep: Optional[str] = None) -> int:
+        """그 사람의 모든 세션을 끝낸다 (keep으로 준 지금 세션은 남긴다). 끝낸 수를 돌려준다."""
+        with self._tx() as db:
+            return db.execute("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?", (user_id, self._token_hash(keep) if keep else "")).rowcount
+
+    def purge_sessions(self, max_days: int, idle_days: int) -> None:
+        now = datetime.now()
+        with self._tx() as db:
+            db.execute("DELETE FROM sessions WHERE created_at < ? OR last_seen < ?",
+                       ((now - timedelta(days=max_days)).isoformat(timespec="seconds"), (now - timedelta(days=idle_days)).isoformat(timespec="seconds")))
 
     def ensure_admin(self, user_id: str, password: Optional[str]) -> Optional[str]:
         """관리자 계정을 보장한다. 비밀번호를 주면 그 값으로 맞추고, 없고 계정도 없으면 임시 비밀번호를 만들어 돌려준다."""

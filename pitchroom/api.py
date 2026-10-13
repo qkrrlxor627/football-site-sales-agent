@@ -3,7 +3,8 @@
 실행: python app.py  (또는 uvicorn pitchroom.api:create_app --factory)
 """
 # 브라우저 한 개 = 서명된 세션 쿠키 한 개 = LangGraph thread 한 개.
-# 쿠키에는 thread 번호와 로그인 아이디만 들어 있고, 대화·주문은 전부 서버 DB에 있다.
+# 쿠키에는 thread 번호와 로그인 세션 토큰(sid)만 들어 있다. 누가 로그인했는지는 서버 DB의 세션 표가 정하므로,
+# 로그아웃·비밀번호 변경 때 서버에서 세션을 지우면 복사해 둔 쿠키도 바로 못 쓰게 된다.
 import logging
 import re
 import sqlite3
@@ -150,6 +151,7 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
     generated = store.ensure_admin(settings.admin_id, settings.admin_password)
     if generated:   # 처음 한 번만 나온다. 바꾸려면 PITCHROOM_ADMIN_PASSWORD를 정하고 다시 띄운다
         log.warning("관리자 계정을 만들었어요. 아이디: %s / 임시 비밀번호: %s  (.env의 PITCHROOM_ADMIN_PASSWORD로 바꿀 수 있어요)", settings.admin_id, generated)
+    store.purge_sessions(settings.session_days, settings.session_idle_days)
     for old in store.stale_threads(settings.thread_days):   # 오래 쉬는 대화 청소 (DB가 끝없이 커지지 않게)
         saver.delete_thread(old)
         store.forget_thread(old)
@@ -211,14 +213,30 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
         request.session["thread"] = str(uuid.uuid4())
         return request.session["thread"]
 
+    def current_user(request: Request) -> Optional[str]:
+        """쿠키의 세션 토큰이 서버에 살아 있을 때만 로그인으로 본다."""
+        request.session.pop("user", None)   # 예전 방식(쿠키에 아이디를 직접 담던) 쿠키는 더 믿지 않는다
+        sid = request.session.get("sid")
+        if not sid:
+            return None
+        user = store.session_user(sid, settings.session_days, settings.session_idle_days)
+        if not user:
+            request.session.pop("sid", None)
+        return user
+
+    def end_session(request: Request) -> None:
+        sid = request.session.pop("sid", None)
+        if sid:
+            store.delete_session(sid)
+
     def current(request: Request) -> tuple[str, Optional[str]]:
-        return request.session.get("thread") or new_thread(request), request.session.get("user")
+        return request.session.get("thread") or new_thread(request), current_user(request)
 
     def sync_account(request: Request, thread: str, user: Optional[str]) -> dict:
         """DB의 계정·주문(원본)을 이 대화의 State에 맞춰 넣고, 최신 State를 돌려준다."""
         acc = store.get_account(user) if user else None
         if user and not acc:
-            request.session.pop("user", None)
+            end_session(request)
         state = graph.get_state(cfg(thread)).values or {}
         if state.get("account") != acc:
             graph.update_state(cfg(thread), {"account": acc}, as_node="respond")
@@ -254,12 +272,13 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
 
     def sign_in(request: Request, user: str, keep: bool) -> dict:
         thread = current(request)[0] if keep else new_thread(request)
-        request.session["user"] = user
+        end_session(request)                                    # 로그인할 때마다 새 토큰 (앞의 세션은 끝낸다)
+        request.session["sid"] = store.create_session(user)
         with lock_for(thread):
             return envelope(request, sync_account(request, thread, user))
 
     def require_admin(request: Request) -> dict:
-        user = request.session.get("user")
+        user = current_user(request)
         acc = store.get_account(user) if user else None
         if not acc:
             raise ApiError(401, "login_required", "로그인해 주세요.")
@@ -361,14 +380,14 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
 
     @app.post("/api/logout")
     def logout(request: Request):
-        request.session.pop("user", None)
+        end_session(request)   # 서버에서 세션을 지운다: 복사해 둔 쿠키로도 다시 들어올 수 없다
         thread = new_thread(request)
         return envelope(request, sync_account(request, thread, None))
 
     @app.post("/api/reset")
     def reset(request: Request):
         """대화만 처음으로. 로그인은 유지한다."""
-        user = request.session.get("user")
+        user = current_user(request)
         thread = new_thread(request)
         return envelope(request, sync_account(request, thread, user))
 
@@ -411,7 +430,7 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
 
     @app.post("/api/password")
     def change_password(body: PasswordIn, request: Request):
-        user = request.session.get("user")
+        user = current_user(request)
         if not user:
             raise ApiError(401, "login_required", "로그인해 주세요.")
         if not 8 <= len(body.new) <= 72:
@@ -421,7 +440,8 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
             store.change_password(user, body.current, body.new)
         except StoreError as err:
             raise ApiError(401 if err.code == "bad_credentials" else 409, err.code, err.message)
-        log.info("password changed user=%s", user)
+        ended = store.delete_user_sessions(user, keep=request.session.get("sid"))   # 다른 기기의 로그인은 모두 끝낸다
+        log.info("password changed user=%s other_sessions_ended=%d", user, ended)
         return {"ok": True}
 
     # ---------- 관리(사장님) 라우트 ----------
@@ -487,6 +507,7 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
             temp = store.reset_password(user_id)
         except StoreError as err:
             raise ApiError(404, err.code, err.message)
+        store.delete_user_sessions(user_id)   # 그 고객의 기존 로그인은 모두 끝낸다
         log.info("admin=%s reset password for user=%s", admin["id"], user_id)
         return {"temp_password": temp, "user_id": user_id}
 

@@ -132,6 +132,15 @@ export const useSession = defineStore('session', () => {
     if (await run(() => api.reset())) closeAll()
   }
 
+  /** 워드마크를 누르면 첫 화면으로: 열린 패널·관리 화면을 닫고 대화를 새로 시작한다. 로그인은 그대로 둔다. */
+  async function goHome() {
+    if (!(await run(() => api.reset()))) return false
+    closeAll()
+    adminOpen.value = false
+    window.scrollTo?.({ top: 0 })
+    return true
+  }
+
   function requestBuy(code: string) {
     if (!account.value) {
       pendingBuy.value = code
@@ -198,7 +207,7 @@ export const useSession = defineStore('session', () => {
   return {
     catalog, health, account, view, ready, fatal, busy, error, panel, loginMessage, loginError, sheetCode, sheetProduct,
     pendingBuy, browsing, modeText, isAdmin, adminOpen,
-    init, send, login, signup, saveContact, changePassword, logout, reset, requestBuy, buy, togglePanel, browseShop,
+    init, send, login, signup, saveContact, changePassword, logout, reset, goHome, requestBuy, buy, togglePanel, browseShop,
     closeSheet: () => (sheetCode.value = null),
     dismissError: () => (error.value = null),
   }

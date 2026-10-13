@@ -144,6 +144,33 @@ describe('session store', () => {
     expect(s.adminOpen).toBe(false)
   })
 
+  it('goes home from the wordmark: new conversation, panels closed, still logged in', async () => {
+    routes['GET /api/session'] = { body: { account: jiwoo, view: view({ screen: 'result', headline: '추천 결과' }) } }
+    routes['POST /api/reset'] = { body: { account: jiwoo, view: view({ screen: 'service', headline: '지우님, 무엇을 도와드릴까요?' }) } }
+    const s = useSession()
+    await s.init()
+    s.togglePanel('catalog')
+    s.requestBuy('S-08')
+    expect(await s.goHome()).toBe(true)
+    expect(calls.at(-1)?.url).toBe('POST /api/reset')
+    expect(s.account?.id).toBe('jiwoo')
+    expect(s.view?.screen).toBe('service')
+    expect(s.panel).toBeNull()
+    expect(s.sheetCode).toBeNull()
+  })
+
+  it('takes an admin from the admin screen back to the shop home', async () => {
+    const admin = { id: 'admin', name: '사장', role: 'admin' as const, orders: [] }
+    routes['GET /api/session'] = { body: { account: admin, view: view() } }
+    routes['POST /api/reset'] = { body: { account: admin, view: view() } }
+    const s = useSession()
+    await s.init()
+    expect(s.adminOpen).toBe(true)
+    await s.goHome()
+    expect(s.adminOpen).toBe(false)
+    expect(s.isAdmin).toBe(true)
+  })
+
   it('lets a customer with orders browse the shop and come back', async () => {
     routes['GET /api/session'] = { body: { account: jiwoo, view: view({ screen: 'service', headline: '지우님' }) } }
     const s = useSession()

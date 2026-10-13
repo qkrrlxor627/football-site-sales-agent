@@ -647,3 +647,128 @@ def test_multi_ground_boots_are_offered_on_grass_but_never_on_dirt_or_indoor(cli
         for t in [surface, "보통", "상관없어요"]:
             view = say(client, t)["view"]
         assert all(BY_CODE[c["code"]]["stud"] != "MG" for c in view["shelf"]["cards"])
+
+
+# ---------- 추가 주문: 받은 뒤 "주문 추가로 하고 싶어"라고 하면 ----------
+@pytest.mark.parametrize("text", ["나 주문 추가로 하고 싶어", "하나 더 살게요", "같은 걸로 또 주문하고 싶어요", "배송 완료됐는데 추가 주문하고 싶어", "재구매하려고요"])
+def test_wanting_another_order_shows_past_shoes_and_asks_conditions(cases, text):
+    c, _ = cases("c_exchange")                      # 배송완료 2일째, S-08 270mm
+    view = say(c, text)["view"]
+    assert (view["route"], view["reason"]) == ("ask", "more:surface")
+    assert view["headline"].startswith("추가 주문 도와드릴게요.") and "조건을 찾지 못했어요" not in view["headline"]
+    card = view["shelf"]["cards"][0]
+    assert (card["code"], card["label"], card["buyable"]) == ("S-08", "지난번 주문", True)
+    assert view["shelf"]["blur"] == 0 and not view["collect"] and view["default_size"] == 270
+    r = c.post("/api/orders", json={"code": "S-08", "size": 270})   # 같은 걸로 바로 다시 주문
+    assert r.status_code == 200 and len(r.json()["account"]["orders"]) == 2
+
+
+def test_another_order_then_new_conditions_goes_on_to_recommend(cases):
+    c, _ = cases("c_many")
+    assert say(c, "추가로 주문하고 싶어요")["view"]["reason"] == "more:surface"
+    assert say(c, "풋살장에서 뛰어요")["view"]["reason"] == "width"
+    say(c, "발볼 보통")
+    assert say(c, "10만원")["view"]["route"] == "recommend"
+
+
+def test_another_order_leaves_a_pending_exchange_question(cases):
+    c, _ = cases("c_exchange")
+    assert say(c, "사이즈가 작아요")["view"]["reason"] == "cs-info"       # 착용 여부를 묻는 중
+    view = say(c, "아니다 그냥 하나 더 주문할게요")["view"]
+    assert view["reason"] == "more:surface"
+    assert c.get("/api/session").json()["account"]["orders"][0]["status"] == "배송완료"   # 교환은 접수되지 않았다
+    assert say(c, "인조잔디")["view"]["route"] == "ask"                    # 구장을 교환 답변으로 읽지 않는다
+
+
+def test_another_order_without_login_or_history_just_asks(client, cases):
+    view = say(client, "추가 주문하고 싶어요")["view"]
+    assert view["reason"] == "more:surface" and view["headline"] == "추가 주문 도와드릴게요. 어떤 구장에서 주로 뛰세요? 천연잔디, 인조잔디, 흙운동장, 풋살장, 실내 중에 알려 주세요."
+    assert view["collect"] and view["shelf"]["blur"] > 0
+    c, _ = cases("c_new")
+    assert say(c, "하나 더 주문할게요")["view"]["collect"]
+
+
+@pytest.mark.parametrize("text", ["교환하고 싶어요", "주문한 거 언제 와요?", "반품하고 싶어요", "인조잔디에서 뛰어요", "사이즈가 작아요"])
+def test_ordinary_questions_are_not_read_as_another_order(text):
+    from pitchroom.extract import keyword_extract
+    assert keyword_extract(text).wants_new_order is False
+
+
+# ---------- 로그인 세션: 서버가 세션을 쥐고 있어 끝내면 바로 끝난다 ----------
+def cookie_of(c):
+    return dict(c.cookies)
+
+
+def test_logout_kills_the_session_even_for_a_copied_cookie(db):
+    app = app_with(db)
+    with TestClient(app) as c:
+        c.post("/api/signup", json={"user_id": "taeho", "name": "태호", "password": "correct-horse"})
+        stolen = cookie_of(c)
+        with TestClient(app, cookies=stolen) as thief:
+            assert thief.get("/api/session").json()["account"]["id"] == "taeho"     # 로그아웃 전에는 같은 쿠키로 들어온다
+        c.post("/api/logout")
+        with TestClient(app, cookies=stolen) as thief:
+            assert thief.get("/api/session").json()["account"] is None            # 로그아웃하면 복사한 쿠키도 끝
+            assert thief.post("/api/orders", json={"code": "S-05", "size": 270}).status_code == 401
+
+
+def test_changing_password_ends_other_devices_but_not_this_one(db):
+    app = app_with(db)
+    with TestClient(app) as laptop, TestClient(app) as phone:
+        laptop.post("/api/signup", json={"user_id": "taeho", "name": "태호", "password": "correct-horse"})
+        phone.post("/api/login", json={"user_id": "taeho", "password": "correct-horse"})
+        assert laptop.post("/api/password", json={"current": "correct-horse", "new": "battery-staple"}).status_code == 200
+        assert laptop.get("/api/session").json()["account"]["id"] == "taeho"
+        assert phone.get("/api/session").json()["account"] is None
+
+
+def test_admin_password_reset_ends_the_customers_sessions(db):
+    app = app_with(db)
+    with TestClient(app) as shopper, TestClient(app) as owner:
+        shopper.post("/api/signup", json={"user_id": "taeho", "name": "태호", "password": "correct-horse"})
+        login_admin(owner)
+        owner.post("/api/admin/customers/taeho/reset-password")
+        assert shopper.get("/api/session").json()["account"] is None
+        assert owner.get("/api/admin/board").status_code == 200                    # 사장님 세션은 그대로
+
+
+def test_session_expires_when_idle_or_too_old(db):
+    import sqlite3
+    from datetime import datetime, timedelta
+    app = app_with(db)
+    ago = lambda days: (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+    with TestClient(app) as c:
+        c.post("/api/signup", json={"user_id": "taeho", "name": "태호", "password": "correct-horse"})
+        con = sqlite3.connect(db)
+        con.execute("UPDATE sessions SET last_seen = ?", (ago(13),)); con.commit()
+        assert c.get("/api/session").json()["account"]["id"] == "taeho"            # 13일 쉰 건 괜찮다
+        con.execute("UPDATE sessions SET last_seen = ?", (ago(15),)); con.commit()
+        assert c.get("/api/session").json()["account"] is None                    # 14일 넘게 쉬면 다시 로그인
+        c.post("/api/login", json={"user_id": "taeho", "password": "correct-horse"})
+        con.execute("UPDATE sessions SET created_at = ?", (ago(31),)); con.commit()
+        assert c.get("/api/session").json()["account"] is None                    # 만든 지 30일이 넘어도 끝
+        assert con.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
+
+
+def test_login_rotates_the_token_and_the_cookie_never_carries_the_user_id(db):
+    import base64, json as _json, sqlite3
+    app = app_with(db)
+    with TestClient(app) as c:
+        c.post("/api/signup", json={"user_id": "taeho", "name": "태호", "password": "correct-horse"})
+        first = cookie_of(c)
+        payload = _json.loads(base64.b64decode(first["pitchroom"].split(".")[0] + "=="))
+        assert set(payload) == {"thread", "sid"} and "taeho" not in str(payload)
+        c.post("/api/login", json={"user_id": "taeho", "password": "correct-horse"})  # 다시 로그인하면 토큰이 바뀌고
+        with TestClient(app, cookies=first) as old:
+            assert old.get("/api/session").json()["account"] is None                 # 앞의 토큰은 못 쓴다
+        stored = sqlite3.connect(db).execute("SELECT token_hash FROM sessions").fetchall()
+        assert len(stored) == 1 and stored[0][0] != payload["sid"] and len(stored[0][0]) == 64   # DB에는 토큰의 해시만
+
+
+def test_tampered_or_legacy_cookie_is_not_a_login(db):
+    import base64, json as _json
+    app = app_with(db)
+    forged = base64.b64encode(_json.dumps({"thread": "x", "user": "admin"}).encode()).decode() + ".AAAAAA.forged-signature"
+    with TestClient(app, cookies={"pitchroom": forged}) as c:
+        assert c.get("/api/session").json()["account"] is None
+        assert c.get("/api/admin/board").status_code == 401

@@ -84,10 +84,14 @@ def intake_node(state: State) -> dict:
     if e.other_requests:
         disc.append(say(st, "접수 에이전트", "규칙에 없는 요청은 참고로 기록해요: " + ", ".join(e.other_requests[:3])))
     missed = not filled and not profile.get("style") and not e.brand
+    more = e.wants_new_order and not filled   # 조건 없이 "추가로 주문하고 싶어요"만 말한 경우
+    if more:
+        disc.append(say(st, "접수 에이전트", "추가 주문 의사를 확인했어요. 지난 주문을 다시 보여 주고 새 조건도 물어볼게요." if (state.get("account") or {}).get("orders")
+                        else "새로 주문하고 싶다는 말씀이에요. 조건부터 물어볼게요."))
     return {
         "turn": turn, "source": source, "extracted": e.model_dump(), "profile": profile, "discussion": disc,
         # 턴마다 새로 정해지는 값들 초기화
-        "route": None, "reason": "missed" if missed else None, "candidates": [], "tradeoffs": {},
+        "route": None, "reason": "more" if more else "missed" if missed else None, "candidates": [], "tradeoffs": {},
         "notice": notice, "cs_card": None, "alts": [], "reply": "",
         "asked": state.get("asked") or {k: 0 for k in SLOT_ORDER}, "skipped": state.get("skipped") or [],
         "cs": state.get("cs") or dict(EMPTY_CS), "account": state.get("account"),
@@ -114,6 +118,8 @@ def guard_node(state: State) -> dict:
 def classify_node(state: State) -> dict:
     """③ 분류: 교환·반품 정보를 기다리는 중이면 그 주제를 유지, 아니면 추출된 intent."""
     cs = state["cs"]
+    if state["extracted"].get("wants_new_order"):   # 교환·반품을 묻던 중이어도 새 주문 이야기로 넘어간다
+        return {"intent": "상담", "cs": {**cs, "waiting": False}}
     return {"intent": cs["topic"] if cs.get("waiting") else state["extracted"]["intent"]}
 
 
@@ -151,7 +157,7 @@ def consult_node(state: State) -> dict:
     if nxt:
         asked[nxt] += 1
         return {"candidates": [x["code"] for x in ranked[:3]], "pool": len(items), "asked": asked, "skipped": skipped,
-                "route": "ask", "reason": nxt if state.get("reason") != "missed" else "missed:" + nxt, "discussion": d}
+                "route": "ask", "reason": f'{state["reason"]}:{nxt}' if state.get("reason") in ("missed", "more") else nxt, "discussion": d}
 
     top = ranked[:3]
     tradeoffs = {}
@@ -257,8 +263,11 @@ def respond_node(state: State) -> dict:
     reply = state.get("reply") or ""
     if not reply:
         if r == "ask":
-            slot = (reason or "").replace("missed:", "")
-            pre = "조건을 찾지 못했어요. " if (reason or "").startswith("missed") else ""
+            kind, _, slot = (reason or "").rpartition(":")   # "missed:surface", "more:surface", "surface"
+            pre = "조건을 찾지 못했어요. " if kind == "missed" else ""
+            if kind == "more":
+                again = bool((state.get("account") or {}).get("orders"))
+                pre = "추가 주문 도와드릴게요. " + ("지난번과 같은 축구화는 위에서 바로 주문할 수 있어요. 새로 찾으시려면, " if again else "")
             filled = sum(p.get(k) is not None for k in SLOT_ORDER)
             reply = pre + (f'지금 조건으로 {state["pool"]}종이 남았어요. ' if filled else "") + ASK_TEXT[slot]
         elif r == "recommend":

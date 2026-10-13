@@ -168,6 +168,17 @@ def result_view(s: dict) -> dict:
                      shelf={"kind": "products", "blur": MAX_BLUR, "paused": False, "cards": [product_card(x, {}) for x in HOME_CODES], "empty_text": None},
                      discussion=c["discussion"], hidden=c["hidden"])
 
+    if route == "ask" and (reason or "").startswith("more:") and acc:   # 추가 주문: 지난번에 산 축구화를 다시 살 수 있게 먼저 보여준다
+        on_sale = {x["code"] for x in PRODUCTS}
+        again = list(dict.fromkeys(o["code"] for o in acc["orders"] if o["code"] in on_sale))[:3]
+        if again:
+            last_size = next(o["size"] for o in acc["orders"] if o["code"] == again[0])
+            return _view(**{**common, "default_size": p.get("size") or last_size},
+                         count={"prefix": "지난번에 주문한 축구화 ", "strong": f"{len(again)}종", "suffix": ""},
+                         shelf={"kind": "products", "blur": 0, "paused": False, "empty_text": "새 축구화는 아래에 조건을 말씀해 주세요",
+                                "cards": [product_card(code, {}, "지난번 주문", quiet=i > 0, buyable=True) for i, code in enumerate(again)]},
+                         slots=slots(p, s.get("skipped")), discussion=c["discussion"], hidden=c["hidden"])
+
     done = route in ("recommend", "alternative")
     filled = sum(p.get(k) is not None or k in (s.get("skipped") or []) for k in SLOT_ORDER)
     cards = []
