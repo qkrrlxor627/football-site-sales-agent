@@ -93,6 +93,20 @@ def apply_catalog(overrides: dict):
 def reset_catalog():
     apply_catalog({})
 LINES = ["Mercurial", "Phantom", "Tiempo"]
+LINE_INFO = {
+    "Mercurial": "가볍고 발에 딱 붙는 스피드형, 발볼이 좁은 편",
+    "Phantom": "볼 터치와 컨트롤에 맞춘 그립 어퍼, 발볼 보통",
+    "Tiempo": "부드러운 가죽 느낌과 편안함, 발볼이 넓은 편",
+}
+STUD_INFO = {
+    "FG": "천연잔디용 긴 스터드",
+    "SG": "젖은 천연잔디용 금속 스터드",
+    "AG": "인조잔디용 짧고 많은 스터드",
+    "TF": "인조·풋살용 고무 돌기",
+    "IC": "실내 체육관용 평평한 창",
+    "HG": "단단한 흙·맨땅용 짧고 단단한 스터드",
+    "MG": "천연·인조잔디 겸용 스터드",
+}
 CARRIED_BRANDS = ["나이키"]
 # 가정: 모든 상품이 전 사이즈 재고 있음 → 사이즈는 묻지도 거르지도 않고, 말하면 기록만 한다.
 

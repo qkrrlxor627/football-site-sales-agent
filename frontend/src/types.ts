@@ -201,7 +201,15 @@ export interface AdminHandoff {
     options: string[]
     order: string | null
     discussion: { agent: string; text: string; internal: boolean }[]
+    transcript?: { role: 'user' | 'assistant'; text: string }[] // 넘어오기까지의 대화
   }
+}
+
+export interface AdminDemand {
+  kind: string
+  label: string
+  total: number
+  items: { key: string; count: number; last_at: string }[]
 }
 
 export interface AdminBoard {
@@ -211,4 +219,6 @@ export interface AdminBoard {
   orders: AdminOrder[]
   products: AdminProduct[]
   customers: AdminCustomer[]
+  demand: AdminDemand[]
+  llm: { enabled: boolean; calls: number; fallbacks: number; avg_ms: number; tokens: number }
 }

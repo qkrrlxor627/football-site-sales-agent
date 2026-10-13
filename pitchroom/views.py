@@ -8,18 +8,10 @@ from typing import Optional
 
 from .data import *  # noqa: F401,F403
 from .graph import service_greeting, to_client
+from .tools import filter_products, rank_products
 
 IMAGE_DIR = Path(__file__).parent / "static" / "images"
 STEP = ["결제완료", "배송중", "배송완료"]
-STUD_INFO = {
-    "FG": "천연잔디용 긴 스터드",
-    "SG": "젖은 천연잔디용 금속 스터드",
-    "AG": "인조잔디용 짧고 많은 스터드",
-    "TF": "인조·풋살용 고무 돌기",
-    "IC": "실내 체육관용 평평한 창",
-    "HG": "단단한 흙·맨땅용 짧고 단단한 스터드",
-    "MG": "천연·인조잔디 겸용 스터드",
-}
 DEFAULT_SIZE = 270
 HOME_CODES = ["S-04", "S-08", "S-02"]
 MAX_BLUR = 12
@@ -178,6 +170,16 @@ def result_view(s: dict) -> dict:
                          shelf={"kind": "products", "blur": 0, "paused": False, "empty_text": "새 축구화는 아래에 조건을 말씀해 주세요",
                                 "cards": [product_card(code, {}, "지난번 주문", quiet=i > 0, buyable=True) for i, code in enumerate(again)]},
                          slots=slots(p, s.get("skipped")), discussion=c["discussion"], hidden=c["hidden"])
+
+    if route == "answer":   # 질문에 답한 화면: 답에 나온 상품이 있으면 그것을, 없으면 지금 조건에 맞는 것을 뒤에 둔다
+        codes = [x["code"] for x in c["candidates"]]
+        shown = codes or [x["code"] for x in rank_products(filter_products(p), p)[:3]]
+        return _view(**common,
+                     count={"prefix": "질문에 나온 축구화" if codes else f"전체 {len(PRODUCTS)}종", "strong": "", "suffix": ""},
+                     shelf={"kind": "products", "blur": 0, "paused": False, "empty_text": None,
+                            "cards": [product_card(code, p, buyable=True) for code in shown]},
+                     slots=slots(p, s.get("skipped")), discussion=c["discussion"], hidden=c["hidden"],
+                     hint="조건(구장·발볼·예산)을 말씀해 주시면 맞는 축구화를 골라 드려요.")
 
     done = route in ("recommend", "alternative")
     filled = sum(p.get(k) is not None or k in (s.get("skipped") or []) for k in SLOT_ORDER)

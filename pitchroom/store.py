@@ -49,6 +49,17 @@ CREATE TABLE IF NOT EXISTS handoffs (
 );
 CREATE INDEX IF NOT EXISTS handoffs_status ON handoffs(status);
 CREATE TABLE IF NOT EXISTS threads (thread_id TEXT PRIMARY KEY, last_seen TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS demand (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    key TEXT NOT NULL,
+    thread_id TEXT,
+    account_id TEXT,
+    UNIQUE (thread_id, kind, key)
+);
+CREATE TABLE IF NOT EXISTS llm_daily (day TEXT NOT NULL, kind TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0, fallbacks INTEGER NOT NULL DEFAULT 0,
+                                      ms_total INTEGER NOT NULL DEFAULT 0, tokens INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, kind));
 CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, last_seen TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
 CREATE TABLE IF NOT EXISTS products (code TEXT PRIMARY KEY, price INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1);
@@ -73,6 +84,7 @@ TRANSITIONS = {
         ("배송완료", "요청 거절", "확인 결과 교환·반품이 어려워요. 자세한 내용은 매장으로 문의해 주세요."),
     ],
 }
+DEMAND_KIND = {"no_match": "맞는 상품이 없던 조건", "brand": "취급하지 않는 브랜드", "other": "규칙에 없는 요청", "question": "답하지 못한 질문"}
 HANDOFF_KIND = {"health": "발 건강 상담", "policy": "교환·반품 결재", "empty": "조건에 맞는 상품 없음", "review": "추천 검수 실패"}
 SCRYPT = {"n": 2 ** 14, "r": 8, "p": 1}
 
@@ -399,6 +411,38 @@ class Store:
                              (now_iso(), resolution, handoff_id))
             if cur.rowcount == 0:
                 raise StoreError("unknown_handoff", "이미 처리했거나 없는 건이에요.")
+
+    # ---------- 수요: 놓친 손님이 무엇을 찾았는지 ----------
+    def add_demand(self, kind: str, key: str, thread_id: Optional[str] = None, account_id: Optional[str] = None) -> bool:
+        """한 대화에서 같은 항목은 한 번만 센다. 새로 기록했으면 True."""
+        with self._tx() as db:
+            cur = db.execute("INSERT OR IGNORE INTO demand (created_at, kind, key, thread_id, account_id) VALUES (?, ?, ?, ?, ?)",
+                             (now_iso(), kind, key[:120], thread_id, account_id))
+            return cur.rowcount > 0
+
+    def demand_summary(self, days: int = 30, top: int = 10) -> list[dict]:
+        cutoff = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+        with self._tx() as db:
+            rows = db.execute("SELECT kind, key, COUNT(*) AS count, MAX(created_at) AS last_at FROM demand WHERE created_at >= ? "
+                              "GROUP BY kind, key ORDER BY count DESC, last_at DESC", (cutoff,)).fetchall()
+        out = []
+        for kind, label in DEMAND_KIND.items():
+            items = [{"key": r["key"], "count": r["count"], "last_at": r["last_at"]} for r in rows if r["kind"] == kind]
+            out.append({"kind": kind, "label": label, "total": sum(i["count"] for i in items), "items": items[:top]})
+        return out
+
+    # ---------- LLM 호출 집계 ----------
+    def add_llm_call(self, kind: str, fallback: bool, ms: int, tokens: int) -> None:
+        with self._tx() as db:
+            db.execute("INSERT INTO llm_daily (day, kind, calls, fallbacks, ms_total, tokens) VALUES (?, ?, 1, ?, ?, ?) "
+                       "ON CONFLICT(day, kind) DO UPDATE SET calls = calls + 1, fallbacks = fallbacks + excluded.fallbacks, "
+                       "ms_total = ms_total + excluded.ms_total, tokens = tokens + excluded.tokens", (day_iso(0), kind, int(fallback), ms, tokens))
+
+    def llm_today(self) -> dict:
+        with self._tx() as db:
+            r = db.execute("SELECT COALESCE(SUM(calls), 0), COALESCE(SUM(fallbacks), 0), COALESCE(SUM(ms_total), 0), COALESCE(SUM(tokens), 0) "
+                           "FROM llm_daily WHERE day = ?", (day_iso(0),)).fetchone()
+        return {"calls": r[0], "fallbacks": r[1], "avg_ms": round(r[2] / r[0]) if r[0] else 0, "tokens": r[3]}
 
     def summary(self) -> dict:
         with self._tx() as db:

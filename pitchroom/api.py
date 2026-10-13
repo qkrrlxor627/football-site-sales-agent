@@ -21,11 +21,12 @@ from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.sqlite import SqliteSaver
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from langgraph.errors import GraphRecursionError
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import config, extract, notify
+from . import answer, config, extract, notify, telemetry
 from . import tools as tools_mod
-from .data import BY_CODE, order_label
+from .data import BY_CODE, CARRIED_BRANDS, order_label
 from .graph import build_graph
 from .store import HANDOFF_KIND, Store, StoreError, order_actions, order_title
 from .views import IMAGE_DIR, account_view, catalog, service_home, slots, view_for
@@ -33,6 +34,7 @@ from .views import IMAGE_DIR, account_view, catalog, service_home, slots, view_f
 log = logging.getLogger("pitchroom.api")
 DIST_DIR = config.ROOT / "frontend" / "dist"
 MAX_TEXT = 500
+RECURSION_LIMIT = 20   # 한 턴에 그래프가 밟을 수 있는 단계 수. 질문 답변 루프가 다 돌아도 10단계라 여유가 있고, 넘으면 멈춘다
 USER_ID = re.compile(r"^[a-z0-9_]{3,20}$")
 PHONE = re.compile(r"^[0-9+\-() ]{9,20}$")
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
@@ -144,6 +146,7 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
     store = Store(db_path, demo=settings.demo)
     saver = SqliteSaver(sqlite3.connect(db_path, check_same_thread=False, timeout=10))
     graph = build_graph(saver)
+    telemetry.set_sink(store.add_llm_call)
     limiter = RateLimiter()
     locks: dict[str, threading.Lock] = defaultdict(threading.Lock)   # 같은 대화에 요청이 겹치면 순서대로 처리
     locks_guard = threading.Lock()
@@ -193,7 +196,7 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
 
     # ---------- 세션 ----------
     def cfg(thread: str) -> dict:
-        return {"configurable": {"thread_id": thread}}
+        return {"configurable": {"thread_id": thread}, "recursion_limit": RECURSION_LIMIT}
 
     def lock_for(thread: str) -> threading.Lock:
         with locks_guard:
@@ -302,6 +305,7 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
             "order": order_label(order) if order else None,
             "discussion": [{"agent": m["agent"], "text": m["text"], "internal": m["visibility"] == "internal"}
                            for m in state.get("discussion", []) if m["turn"] == state["turn"]],
+            "transcript": [{"role": h["role"], "text": h["text"]} for h in (state.get("history") or [])[-12:]],   # 넘어오기까지의 대화
         }
         kind = kind if kind in HANDOFF_KIND else "review"
         made = store.add_handoff(kind, summary, detail, thread, account_id=acc["id"] if acc else None, order_id=order["id"] if order else None)
@@ -311,6 +315,21 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
             who = f'{acc["name"]}({acc["id"]})' if acc else "비로그인 고객"
             notify.send(settings.notify_webhook, f'[PITCHROOM] 넘어온 건: {HANDOFF_KIND[kind]} · {who}' + (f' · {order["id"]}' if order else "") + " — 관리 화면에서 확인해 주세요.")
             log.info("handoff id=%s kind=%s user=%s order=%s", made, kind, acc["id"] if acc else "-", order["id"] if order else "-")
+
+    def record_demand(thread: str, state: dict):
+        """에이전트가 "사장님께 기록했어요"라고 말한 것을 실제로 남긴다: 놓친 조건, 찾는 브랜드, 규칙 밖 요청, 답 못 한 질문."""
+        acc, e = (state.get("account") or {}).get("id"), state.get("extracted") or {}
+        route, reason = state.get("route"), state.get("reason")
+        if route == "alternative" or (route == "escalate" and reason == "empty"):
+            wanted = " · ".join(f'{s["label"]} {s["text"]}' for s in slots(state.get("profile") or {}, state.get("skipped")) if s["on"])
+            if wanted:
+                store.add_demand("no_match", wanted, thread, acc)
+        if e.get("brand") and e["brand"] not in CARRIED_BRANDS:
+            store.add_demand("brand", e["brand"], thread, acc)
+        for item in e.get("other_requests") or []:
+            store.add_demand("other", item, thread, acc)
+        if route == "answer" and reason == "unknown":
+            store.add_demand("question", state["user_text"][:80], thread, acc)
 
     # ---------- 고객 라우트 ----------
     @app.get("/api/health")
@@ -338,12 +357,28 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
         throttle(request, "chat", settings.chat_per_minute, key=thread)
         started = time.perf_counter()
         with lock_for(thread):
-            before = sync_account(request, thread, user).get("account")
-            state = graph.invoke({"user_text": text}, cfg(thread))
+            before_state = sync_account(request, thread, user)
+            before = before_state.get("account")
+            snapshot = graph.get_state(cfg(thread))
+            try:
+                state = graph.invoke({"user_text": text}, cfg(thread))
+            except GraphRecursionError:
+                # 그래프가 단계 상한을 넘겼다(돌고 있었다는 뜻). 이 턴을 없던 일로 되돌리고 대체 답을 준다
+                log.error("그래프 단계 상한 초과: thread=%s chars=%d", thread[:8], len(text))
+                telemetry.record("answer", fallback=True)
+                if snapshot.config.get("configurable", {}).get("checkpoint_id"):
+                    graph.update_state(snapshot.config, {"account": before}, as_node="respond")   # 직전 체크포인트에서 다시 갈라 나온다
+                else:
+                    saver.delete_thread(thread)
+                restored = sync_account(request, thread, user)
+                store.add_demand("question", text[:80], thread, user)
+                view = view_for(restored)
+                return envelope(request, restored, {**view, "headline": answer.FALLBACK, "echo": text})
             if state.get("account"):
                 store.save_orders(state["account"], before)   # 정책 에이전트가 바꾼 주문 상태를 원본에 반영
             if state.get("route") == "escalate":
                 record_handoff(thread, state, before)
+            record_demand(thread, state)
             store.touch_thread(thread)
         log.info("chat thread=%s user=%s route=%s/%s source=%s chars=%d %.0fms", thread[:8], user or "-", state.get("route"),
                  state.get("reason"), state.get("source"), len(text), (time.perf_counter() - started) * 1000)
@@ -458,6 +493,8 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
             "done": [{**h, "kind_label": HANDOFF_KIND.get(h["kind"], h["kind"])} for h in store.list_handoffs("done")[:20]],
             "orders": [admin_order(o) for o in store.list_orders()],
             "products": store.list_products(),
+            "demand": store.demand_summary(),
+            "llm": {**store.llm_today(), "enabled": extract.EXTRACTOR is not None},
             "customers": store.list_customers(),
         }
 

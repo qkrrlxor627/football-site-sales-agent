@@ -6,7 +6,7 @@ import { won } from '../format'
 import type { AdminOrder, AdminProduct } from '../types'
 
 const admin = useAdmin()
-const tab = ref<'work' | 'products' | 'customers'>('work')
+const tab = ref<'work' | 'products' | 'customers' | 'demand'>('work')
 const filter = ref<'todo' | 'all'>('todo')
 const sizes = reactive<Record<string, number | undefined>>({}) // 교환해 보낼 사이즈 (주문별)
 const edits = reactive<Record<string, { price: number; stock: Record<number, number> }>>({}) // 상품별 수정 중인 값
@@ -22,6 +22,14 @@ onMounted(() => {
 onBeforeUnmount(() => clearInterval(timer))
 
 const orders = computed(() => (admin.board?.orders ?? []).filter((o) => filter.value === 'all' || o.actions.length > 0))
+const demandTotal = computed(() => (admin.board?.demand ?? []).reduce((n, d) => n + d.total, 0))
+// 문장 이해·질문 답변에 LLM을 몇 번 불렀고, 그중 몇 번이 실패해 규칙으로 대체됐는지
+const llmTile = computed(() => {
+  const l = admin.board?.llm
+  if (!l) return '—'
+  if (!l.enabled && !l.calls) return '꺼짐'
+  return l.fallbacks ? `${l.calls} (대체 ${l.fallbacks})` : `${l.calls}`
+})
 const tiles = computed(() => {
   const s = admin.board?.summary
   if (!s) return []
@@ -32,6 +40,7 @@ const tiles = computed(() => {
     { label: '교환·반품 진행', value: s.in_service, alert: false },
     { label: '전체 주문', value: s.orders, alert: false },
     { label: '고객', value: s.customers, alert: false },
+    { label: '오늘 LLM 호출', value: llmTile.value, alert: false },
   ]
 })
 
@@ -92,6 +101,7 @@ async function resolve(id: number) {
         <button type="button" role="tab" :aria-selected="tab === 'work'" @click="tab = 'work'">할 일</button>
         <button type="button" role="tab" :aria-selected="tab === 'products'" @click="tab = 'products'">상품·재고</button>
         <button type="button" role="tab" :aria-selected="tab === 'customers'" @click="tab = 'customers'">고객 {{ admin.board.customers.length }}</button>
+        <button type="button" role="tab" :aria-selected="tab === 'demand'" @click="tab = 'demand'">수요 {{ demandTotal }}</button>
       </div>
 
       <template v-if="tab === 'work'">
@@ -111,6 +121,12 @@ async function resolve(id: number) {
           <ul v-if="h.detail.rules.length" class="rules">
             <li v-for="r in h.detail.rules" :key="r">{{ r }}</li>
           </ul>
+          <details v-if="h.detail.transcript && h.detail.transcript.length > 1">
+            <summary>대화 전체 {{ h.detail.transcript.length }}줄</summary>
+            <ol class="talk">
+              <li v-for="(m, i) in h.detail.transcript" :key="i" :class="m.role">{{ m.text }}</li>
+            </ol>
+          </details>
           <details>
             <summary>에이전트 논의 {{ h.detail.discussion.length }}건 (내부 포함)</summary>
             <ul class="disc">
@@ -199,6 +215,20 @@ async function resolve(id: number) {
         </ul>
       </template>
 
+      <template v-else-if="tab === 'demand'">
+        <p class="muted">최근 30일 동안 손님이 찾았지만 우리가 채워 주지 못한 것들이에요. 한 대화에서 같은 항목은 한 번만 셉니다.</p>
+        <p v-if="!demandTotal" class="muted">아직 기록된 것이 없어요.</p>
+        <div class="demand">
+          <section v-for="d in admin.board.demand" :key="d.kind">
+            <h3>{{ d.label }} <span class="n">{{ d.total }}</span></h3>
+            <p v-if="!d.items.length" class="muted">없음</p>
+            <ol>
+              <li v-for="i in d.items" :key="i.key"><span class="key">{{ i.key }}</span><b>{{ i.count }}건</b></li>
+            </ol>
+          </section>
+        </div>
+      </template>
+
       <template v-else>
         <p class="muted">고객이 비밀번호를 잊었으면 임시 비밀번호를 만들어 전해 주세요. 만든 비밀번호는 여기에 한 번만 보여요.</p>
         <p v-if="temp" class="temp" role="status">{{ temp.id }} 임시 비밀번호: <code>{{ temp.password }}</code> <button class="switch" type="button" @click="temp = null">가리기</button></p>
@@ -253,6 +283,16 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .act { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .act input { flex: 1 1 220px; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 7px 12px; background: var(--bg); font-size: 14px; }
 .filters { display: flex; gap: 6px; }
+.talk { margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.talk li { max-width: 85%; padding: 7px 11px; border-radius: 4px 14px 14px 14px; background: var(--tile); overflow-wrap: anywhere; }
+.talk li.user { align-self: flex-end; border-radius: 14px 4px 14px 14px; background: var(--fg); color: var(--bg); }
+.demand { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.demand section { background: var(--tile); border-radius: 16px; padding: 14px 16px; }
+.demand h3 { margin: 0 0 8px; font-family: var(--font-display); font-size: 14px; }
+.demand ol { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13.5px; }
+.demand li { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.demand .key { overflow-wrap: anywhere; }
+.demand b { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
 .tabs button { background: none; border: 0; padding: 8px 12px; font-size: 14px; font-weight: 600; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--fg); }

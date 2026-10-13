@@ -3,13 +3,21 @@ import math
 from typing import Optional
 
 from .data import *  # noqa: F401,F403
-from .extract import extract, ground_check
+from .answer import FALLBACK, answer_agent_node, answer_check_node, answer_route, answer_tools_node
+from .extract import extract, ground_check, is_question
 from .tools import check_policy, filter_products, find_order, nearest_alternatives, player_line, rank_products
 
 # 노드는 State 전체를 받고, 바꿀 키만 담은 dict를 반환한다. LangGraph가 그 dict를 State에 합친다.
-# discussion은 reducer(operator.add)라서 '새 항목만' 반환하면 기존 기록 뒤에 붙는다.
-import operator
+# discussion과 history는 reducer라서 '새 항목만' 반환하면 기존 기록 뒤에 붙고, 오래된 것은 밀려난다.
+import re
 from typing import Annotated, TypedDict
+
+
+def keep_last(n: int):
+    """뒤에 붙이되 최근 n개만 남기는 reducer. 대화가 길어져도 State(와 체크포인트)가 끝없이 커지지 않는다."""
+    def merge(old: Optional[list], new: Optional[list]) -> list:
+        return ((old or []) + (new or []))[-n:]
+    return merge
 
 
 class State(TypedDict, total=False):
@@ -32,7 +40,15 @@ class State(TypedDict, total=False):
     cs_card: Optional[dict]
     alts: list
     reply: str
-    discussion: Annotated[list, operator.add]       # {turn, agent, text, visibility} 누적
+    discussion: Annotated[list, keep_last(60)]      # {turn, agent, text, visibility} 최근 60개
+    history: Annotated[list, keep_last(40)]         # {turn, role: user|assistant, text} 최근 40개 (사장님이 넘어온 건의 맥락을 본다)
+    # 질문 답변 구간(answer.py)에서만 쓰는 값. 턴마다 intake가 비운다
+    answer_msgs: list                               # 도구 루프의 메시지
+    answer_steps: int                               # 상담 에이전트가 돈 횟수 (상한: answer.MAX_STEPS)
+    answer_started: Optional[float]
+    answer_used: list                               # 부른 도구 이름
+    answer_draft: Optional[str]                     # 표에서 바로 나온 답 (LLM 없이)
+    answer_error: bool
 
 
 def say(state, agent, text, visibility="public"):
@@ -43,11 +59,20 @@ EMPTY_PROFILE = {"surface": None, "width": None, "budget": None, "size": None, "
 EMPTY_CS = {"topic": None, "days": None, "worn": None, "repeat": False, "waiting": False}
 
 
+def clean(value, limit: int):
+    """LLM이 만든 자유 문자열을 화면·기록에 쓰기 전에: 줄바꿈·제어문자를 지우고 길이를 묶는다."""
+    if not isinstance(value, str):
+        return value
+    return re.sub(r"[\x00-\x1f\x7f]+", " ", value).strip()[:limit] or None
+
+
 def intake_node(state: State) -> dict:
     """① 접수 에이전트: 문장에서 정보를 뽑아 profile에 합친다. 턴마다 바뀌는 값은 여기서 초기화."""
     turn = state.get("turn", 0) + 1
     st = {**state, "turn": turn}
     e, source = extract(state["user_text"], state)
+    e = e.model_copy(update={"brand": clean(e.brand, 20), "player": clean(e.player, 20), "player_boot": clean(e.player_boot, 30), "style_why": clean(e.style_why, 30),
+                             "other_requests": [c for c in (clean(x, 30) for x in e.other_requests[:3]) if c]})
     profile = {**EMPTY_PROFILE, **(state.get("profile") or {})}
     disc = []
     if source == "LLM":
@@ -90,6 +115,8 @@ def intake_node(state: State) -> dict:
                         else "새로 주문하고 싶다는 말씀이에요. 조건부터 물어볼게요."))
     return {
         "turn": turn, "source": source, "extracted": e.model_dump(), "profile": profile, "discussion": disc,
+        "history": [{"turn": turn, "role": "user", "text": state["user_text"][:500]}],
+        "answer_msgs": [], "answer_steps": 0, "answer_started": None, "answer_used": [], "answer_draft": None, "answer_error": False,
         # 턴마다 새로 정해지는 값들 초기화
         "route": None, "reason": "more" if more else "missed" if missed else None, "candidates": [], "tradeoffs": {},
         "notice": notice, "cs_card": None, "alts": [], "reply": "",
@@ -118,9 +145,17 @@ def guard_node(state: State) -> dict:
 def classify_node(state: State) -> dict:
     """③ 분류: 교환·반품 정보를 기다리는 중이면 그 주제를 유지, 아니면 추출된 intent."""
     cs = state["cs"]
-    if state["extracted"].get("wants_new_order"):   # 교환·반품을 묻던 중이어도 새 주문 이야기로 넘어간다
+    e = state["extracted"]
+    if e.get("wants_new_order"):   # 교환·반품을 묻던 중이어도 새 주문 이야기로 넘어간다
         return {"intent": "상담", "cs": {**cs, "waiting": False}}
-    return {"intent": cs["topic"] if cs.get("waiting") else state["extracted"]["intent"]}
+    asked = is_question(state["user_text"])   # LLM이 질문을 교환·상담으로 읽는 일이 있어 규칙으로도 본다
+    if e["intent"] == "질문" or asked:
+        gave_condition = any(e.get(k) is not None for k in ("surface", "width", "budget")) and not asked
+        answering_cs = cs.get("waiting") and (e["cs"].get("days") is not None or e["cs"].get("worn") is not None)
+        if not gave_condition and not answering_cs:
+            return {"intent": "질문"}   # 묻던 교환·반품은 그대로 둔 채 질문에만 답한다
+        return {"intent": cs["topic"] if cs.get("waiting") else "상담"}
+    return {"intent": cs["topic"] if cs.get("waiting") else e["intent"]}
 
 
 def consult_node(state: State) -> dict:
@@ -283,6 +318,8 @@ def respond_node(state: State) -> dict:
             reply = f'조건을 전부 맞추는 신발은 없어서, 가장 가까운 {len(state["candidates"])}켤레를 골랐어요. 1순위는 {top["name"]} {top["stud"]}예요. (양보: {" · ".join(state["tradeoffs"][top["code"]])})'
         elif r == "cs":
             reply = state["cs_card"]["next"]
+        elif r == "answer":   # 답은 answer_check가 이미 정했다. 여기까지 비어 왔다면 넘긴다
+            reply = FALLBACK
         elif r == "escalate":
             reply = {"health": "발 건강과 관련된 부분은 제가 판단하지 않고 피팅 전문가에게 연결해 드릴게요. 상담 전까지 추천은 잠시 멈춰 둘게요.",
                      "empty": "안전하게 권할 수 있는 신발이 없어서 사장님께 넘겼어요. 입고 알림이나 매장 시착 상담을 도와드릴게요.",
@@ -292,7 +329,7 @@ def respond_node(state: State) -> dict:
     leaked = [w for w in FORBIDDEN_WORDS if w in reply]
     if leaked:  # 템플릿이라 거의 없지만, 나중에 LLM이 답변을 쓰게 되면 이 줄이 마지막 방어선
         reply = "내부 정보가 섞여 답변을 다시 만들고 있어요. 담당자가 확인할게요."
-    return {"reply": reply}
+    return {"reply": reply, "history": [{"turn": state.get("turn", 0), "role": "assistant", "text": reply[:500]}]}
 
 
 from langgraph.graph import StateGraph, START, END
@@ -304,7 +341,7 @@ def route_after_guard(state: State) -> str:
 
 
 def route_by_intent(state: State) -> str:
-    return "consult" if state["intent"] == "상담" else "cs"
+    return {"상담": "consult", "질문": "answer"}.get(state["intent"], "cs")
 
 
 builder = StateGraph(State)
@@ -315,10 +352,17 @@ builder.add_node("consult", consult_node)
 builder.add_node("cs", cs_node)
 builder.add_node("review", review_node)
 builder.add_node("respond", respond_node)
+builder.add_node("answer_agent", answer_agent_node)
+builder.add_node("answer_tools", answer_tools_node)
+builder.add_node("answer_check", answer_check_node)
 builder.add_edge(START, "intake")
 builder.add_edge("intake", "guard")
 builder.add_conditional_edges("guard", route_after_guard, {"health": "respond", "ok": "classify"})
-builder.add_conditional_edges("classify", route_by_intent, {"consult": "consult", "cs": "cs"})
+builder.add_conditional_edges("classify", route_by_intent, {"consult": "consult", "cs": "cs", "answer": "answer_agent"})
+# 질문 답변만 돈다: 에이전트 ⇄ 도구. 언제 끝낼지는 answer_route가 횟수와 시간으로 정한다 (answer.py 머리말)
+builder.add_conditional_edges("answer_agent", answer_route, {"tools": "answer_tools", "check": "answer_check"})
+builder.add_edge("answer_tools", "answer_agent")
+builder.add_edge("answer_check", "respond")
 builder.add_edge("consult", "review")
 builder.add_edge("review", "respond")
 builder.add_edge("cs", "respond")

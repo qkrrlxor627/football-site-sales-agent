@@ -1,10 +1,12 @@
 """정보 추출: 자연어 이해는 LLM, 실패하면 키워드 규칙. LLM이 지어낸 값은 ground_check가 버린다."""
 # LLM 출력은 Pydantic 스키마로 받는다. 선택지는 Literal로 묶어서 '없는 구장' 같은 값이 들어오지 못하게 한다.
 import re
+import time
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from . import telemetry
 from .config import MODEL, USE_LLM
 from .data import PLAYER_TABLE, RED_FLAGS, order_label
 
@@ -16,7 +18,10 @@ class CsInfo(BaseModel):
 
 
 class Extracted(BaseModel):
-    intent: Literal["상담", "배송", "교환", "반품"] = Field("상담", description="신발이 작다·크다·불편하다는 교환, 주문이 어디쯤이냐는 배송")
+    intent: Literal["상담", "배송", "교환", "반품", "질문"] = Field("상담", description=(
+        "신발이 작다·크다·불편하다는 교환, 내 주문이 어디쯤이냐는 배송. "
+        "질문: 상품·스터드·라인의 차이나 특징, 매장 정책(교환 기한, 배송비 등)을 '설명해 달라'는 물음. "
+        "조건을 말하거나 추천·구매를 원하면 질문이 아니라 상담"))
     surface: Optional[Literal["천연잔디", "인조잔디", "흙운동장", "풋살장", "실내"]] = Field(None, description="맨땅·학교 흙바닥은 흙운동장")
     width: Optional[Literal["좁음", "보통", "넓음"]] = Field(None, description="칼발은 좁음")
     budget: Optional[int] = Field(None, description="원 단위 예산. 상관없다고 하면 -1")
@@ -34,6 +39,7 @@ class Extracted(BaseModel):
 
 EXTRACT_PROMPT = """너는 축구화 매장 상담 시스템의 정보 추출기다. 추천이나 판단은 하지 말고 고객 메시지에서 정보만 뽑아라.
 매장: PITCHROOM. 나이키 축구화만 판매. 라인: Mercurial(가볍고 빠른 스피드형), Phantom(볼 터치·컨트롤형), Tiempo(가죽, 편안함, 넓은 발볼).
+최근 대화: {history}
 직전에 매장이 한 말: {last_reply}
 지금까지 파악한 조건: {profile}
 고객 상태: {account}
@@ -45,6 +51,18 @@ if USE_LLM:
     # function_calling 방식: Optional·기본값이 많은 스키마에서 strict json_schema보다 덜 까다롭다.
     # timeout: 응답이 늦으면 기다리지 않고 키워드 규칙으로 넘어간다 (웹 요청이 멈춰 있지 않게).
     EXTRACTOR = ChatOpenAI(model=MODEL, temperature=0, timeout=20, max_retries=1).with_structured_output(Extracted, method="function_calling")
+
+
+QUESTION = re.compile(
+    r"차이|다른\s*점|뭐가\s*달라|어떻게\s*달라|비교해|방수|무게|소재|재질|제일\s*(싼|비싼|저렴)|가장\s*(싼|비싼|저렴)"
+    r"|(FG|SG|AG|MG|TF|HG|IC)\s*(가|는|이|란|이란|도|를)?\s*(뭐|무엇|무슨|신어도|써도|괜찮|되나|돼|안\s*되)"
+    r"|스터드.{0,6}(뭐|무엇|종류|차이)|(교환|반품).{0,10}(며칠|기간|언제까지|몇\s*번|몇\s*회|조건|되나요|가능한가)"
+    r"|배송비|몇\s*시까지|당일\s*출고", re.I)
+
+
+def is_question(text: str) -> bool:
+    """설명을 바라는 물음인가. LLM이 교환·상담으로 읽어도 이 규칙에 걸리면 질문으로 본다 ("교환 며칠까지 돼요?"는 교환 접수가 아니다)."""
+    return bool(QUESTION.search(text)) and not re.search(r"추천|골라|찾아\s*(줘|주)", text)
 
 
 def keyword_extract(text: str) -> Extracted:
@@ -100,6 +118,9 @@ def keyword_extract(text: str) -> Extracted:
         e.intent = "반품"
     elif re.search(r"교환|바꾸|바꿔|작아|커요|커서|헐렁|꽉 껴|끼어|안 맞", t):
         e.intent = "교환"
+    # 설명을 바라는 물음: 차이·특징·정책. 조건을 말했거나("인조잔디용 추천") 내 주문 이야기면 질문이 아니다
+    if is_question(t):
+        e.intent = "질문"
     m = re.search(r"(\d{1,2})\s*일", t)
     if m:
         e.cs.days = int(m.group(1))
@@ -122,14 +143,19 @@ def extract(text: str, state: dict) -> tuple[Extracted, str]:
         return keyword_extract(text), "키워드 규칙"
     acc = state.get("account")
     prompt = EXTRACT_PROMPT.format(
+        history=" / ".join(f'{"고객" if h["role"] == "user" else "매장"}: {h["text"][:80]}' for h in (state.get("history") or [])[-4:]) or "(없음)",
         last_reply=state.get("reply") or "(없음)",
         profile={k: v for k, v in (state.get("profile") or {}).items() if v is not None},
         account=("로그인, 주문: " + " / ".join(f'{o["id"]} {order_label(o)} {o["status"]}' for o in acc["orders"])) if acc else "로그인 전",
         text=text,
     )
+    started = time.perf_counter()
     try:
-        return EXTRACTOR.invoke(prompt), "LLM"
+        out = EXTRACTOR.invoke(prompt)
+        telemetry.record("extract", ms=(time.perf_counter() - started) * 1000)
+        return out, "LLM"
     except Exception as err:  # 네트워크·스키마 오류 등: 대화를 멈추지 않고 규칙으로 계속
+        telemetry.record("extract", fallback=True, ms=(time.perf_counter() - started) * 1000)
         return keyword_extract(text), f"키워드 규칙 (LLM 실패: {type(err).__name__})"
 
 
