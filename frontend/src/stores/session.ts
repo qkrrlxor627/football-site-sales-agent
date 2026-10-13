@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 import { api, ApiError } from '../api'
-import type { Account, Catalog, Envelope, Health, View } from '../types'
+import type { Account, Catalog, Envelope, Health, ProductCard, View } from '../types'
 
 export type Panel = 'login' | 'orders' | null
 
@@ -28,7 +28,12 @@ export const useSession = defineStore('session', () => {
 
   const view = computed<View | null>(() => (browsing.value && catalog.value ? catalog.value.shop_home : serverView.value))
   const isAdmin = computed(() => account.value?.role === 'admin')
-  const sheetProduct = computed(() => catalog.value?.products.find((p) => p.code === sheetCode.value) ?? null)
+  // 구매 시트에 띄울 상품: 지금 화면의 카드(가장 최신 재고)를 먼저 보고, 없으면 카탈로그에서 찾는다.
+  const sheetProduct = computed(() => {
+    const shelf = view.value?.shelf
+    const card = shelf?.kind === 'products' ? shelf.cards.find((c: ProductCard) => c.code === sheetCode.value) : undefined
+    return card ?? catalog.value?.products.find((p) => p.code === sheetCode.value) ?? null
+  })
   const modeText = computed(() => {
     if (!health.value) return '확인 중'
     return health.value.llm ? `LLM (${health.value.model})` : '키워드 규칙 (LLM 키 없음)'
@@ -149,14 +154,30 @@ export const useSession = defineStore('session', () => {
           requestBuy(code)
           return true
         }
+        if (err instanceof ApiError && (err.code === 'out_of_stock' || err.code === 'not_for_sale')) {
+          api.session().then(apply, () => {}) // 방금 품절됐다: 남은 사이즈를 다시 받아 보여준다
+        }
         return false
       },
     )
     if (ok) {
       sheetCode.value = null
       panel.value = 'orders'
+      api.catalog().then((c) => (catalog.value = c), () => {}) // 재고가 줄었다
     }
     return ok
+  }
+
+  const saveContact = (contact: string) => run(() => api.contact(contact.trim()))
+
+  /** 비밀번호 변경. 실패 이유를 문자열로, 성공하면 null을 돌려준다 (패널 안에 보여주기 위해). */
+  async function changePassword(current: string, next: string): Promise<string | null> {
+    try {
+      await api.changePassword(current, next)
+      return null
+    } catch (err) {
+      return message(err)
+    }
   }
 
   function togglePanel(next: Exclude<Panel, null>) {
@@ -176,7 +197,7 @@ export const useSession = defineStore('session', () => {
   return {
     catalog, health, account, view, ready, fatal, busy, error, panel, loginMessage, loginError, sheetCode, sheetProduct,
     pendingBuy, browsing, modeText, isAdmin, adminOpen,
-    init, send, login, signup, logout, reset, requestBuy, buy, togglePanel, browseShop,
+    init, send, login, signup, saveContact, changePassword, logout, reset, requestBuy, buy, togglePanel, browseShop,
     closeSheet: () => (sheetCode.value = null),
     dismissError: () => (error.value = null),
   }

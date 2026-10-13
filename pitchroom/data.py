@@ -16,6 +16,41 @@ PRODUCTS = [
     {"code": "S-10", "line": "Mercurial", "name": "Mercurial Vapor 17 Club",    "stud": "IC", "width": "보통", "price": 89000,  "feel": "체육관 바닥용 평평한 고무창"},
 ]
 BY_CODE = {p["code"]: p for p in PRODUCTS}
+BASE_PRODUCTS = [dict(p) for p in PRODUCTS]   # 코드에 적힌 원래 값 (가격·판매 여부는 DB가 덮어쓴다)
+
+# 사이즈별 재고 시드 (데모 스냅샷). 0이면 품절. 실제 수량은 DB에 있고 관리 화면에서 바꾼다.
+STOCK_SIZES = [250, 255, 260, 265, 270, 275, 280, 285, 290]
+STOCK_SEED = {
+    "S-01": [1, 2, 3, 2, 0, 1, 1, 0, 0],
+    "S-02": [2, 3, 4, 5, 3, 0, 2, 1, 0],
+    "S-03": [0, 1, 2, 2, 1, 1, 0, 0, 0],
+    "S-04": [1, 1, 2, 3, 3, 2, 1, 1, 0],
+    "S-05": [3, 4, 5, 4, 4, 3, 2, 2, 1],
+    "S-06": [1, 2, 2, 0, 2, 2, 1, 0, 0],
+    "S-07": [2, 3, 3, 4, 5, 4, 3, 2, 1],
+    "S-08": [1, 1, 2, 2, 3, 0, 2, 1, 1],
+    "S-09": [0, 1, 1, 2, 2, 1, 1, 0, 0],
+    "S-10": [4, 5, 6, 6, 5, 4, 3, 2, 1],
+}
+
+
+def apply_catalog(overrides: dict):
+    """DB의 가격·판매 여부를 규칙이 보는 상품 목록에 반영한다. {code: {"price": int, "active": bool}}
+
+    PRODUCTS와 BY_CODE를 '제자리에서' 고친다: 다른 모듈이 이미 들고 있는 같은 목록이 함께 바뀐다.
+    숨긴 상품은 PRODUCTS에서 빠져 추천되지 않지만, BY_CODE에는 남아 지난 주문의 이름을 계속 보여준다.
+    """
+    active = []
+    for base in BASE_PRODUCTS:
+        o = overrides.get(base["code"], {})
+        BY_CODE[base["code"]].update({**base, "price": o.get("price", base["price"])})
+        if o.get("active", True):
+            active.append(BY_CODE[base["code"]])
+    PRODUCTS[:] = active
+
+
+def reset_catalog():
+    apply_catalog({})
 LINES = ["Mercurial", "Phantom", "Tiempo"]
 CARRIED_BRANDS = ["나이키"]
 # 가정: 모든 상품이 전 사이즈 재고 있음 → 사이즈는 묻지도 거르지도 않고, 말하면 기록만 한다.

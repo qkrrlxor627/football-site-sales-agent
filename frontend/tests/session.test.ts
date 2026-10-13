@@ -11,14 +11,14 @@ const view = (over: Partial<View> = {}): View => ({
   count: { prefix: '전체 10종', strong: '', suffix: '' },
   shelf: { kind: 'products', blur: 12, paused: false, cards: [], empty_text: null },
   news: null, slots: [], handoff: null, hint: null, discussion: [], hidden: 0,
-  route: null, reason: null, source: null, placeholder: '', default_size: 270, ...over,
+  route: null, reason: null, source: null, placeholder: '', default_size: 270, contact: null, ...over,
 })
 const card: Card = {
   code: 'S-08', name: 'Tiempo Maestro Pro', line: 'Tiempo', stud: 'AG', stud_info: '인조잔디용 짧고 많은 스터드', width: '넓음',
-  price: 219000, feel: '가죽 어퍼', image: null, label: '먼저 신어볼 1켤레', quiet: false, best: true, trade: null, why: '인조잔디 → AG', buyable: true,
+  price: 219000, feel: '가죽 어퍼', image: null, label: '먼저 신어볼 1켤레', quiet: false, best: true, trade: null, why: '인조잔디 → AG', buyable: true, sizes: [265, 270], size_note: null,
 }
 const catalog: Catalog = {
-  products: [card], sizes: [265, 270, 275], demo_accounts: [{ id: 'jiwoo', name: '지우', desc: '배송 완료 3일째' }], policy: {}, shop_home: view(),
+  products: [card], demo_accounts: [{ id: 'jiwoo', name: '지우', desc: '배송 완료 3일째' }], policy: {}, shop_home: view(),
 }
 const jiwoo: Account = { id: 'jiwoo', name: '지우', role: 'customer', orders: [] }
 const health = { ok: true, llm: false, model: null, search: false }
@@ -111,7 +111,8 @@ describe('session store', () => {
     expect(s.sheetProduct?.code).toBe('S-08')
 
     expect(await s.buy(270)).toBe(true)
-    expect(calls.at(-1)?.body).toEqual({ code: 'S-08', size: 270 })
+    expect(calls.find((c) => c.url === 'POST /api/orders')?.body).toEqual({ code: 'S-08', size: 270 })
+    expect(calls.at(-1)?.url).toBe('GET /api/catalog') // 재고가 줄었으니 다시 받는다
     expect(s.sheetCode).toBeNull()
     expect(s.panel).toBe('orders')
     expect(s.view?.headline).toContain('PR-0006')
@@ -163,6 +164,13 @@ describe('ProductCard', () => {
     expect(w.find('.no-photo').text()).toBe('AG')
     await w.find('button.buy').trigger('click')
     expect(w.emitted('buy')).toEqual([['S-08']])
+  })
+
+  it('marks a sold-out shoe and blocks buying it', () => {
+    const w = mount(ProductCard, { props: { card: { ...card, sizes: [], size_note: '전 사이즈 품절' } } })
+    expect(w.text()).toContain('전 사이즈 품절')
+    expect(w.find('button.buy').attributes('disabled')).toBeDefined()
+    expect(w.find('button.buy').text()).toBe('품절')
   })
 
   it('lists trade-offs instead of the reason when the shoe is a compromise', () => {

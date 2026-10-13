@@ -4,6 +4,7 @@ import { computed, nextTick, ref } from 'vue'
 import { useSession } from '../stores/session'
 import type { View } from '../types'
 import AskBar from './AskBar.vue'
+import ContactForm from './ContactForm.vue'
 import CsNews from './CsNews.vue'
 import DiscussionList from './DiscussionList.vue'
 import HandoffBox from './HandoffBox.vue'
@@ -62,7 +63,8 @@ async function send(text: string) {
       <SlotChips v-if="view.slots.length" :slots="view.slots" />
       <p v-if="view.hint" class="echo">{{ view.hint }}</p>
       <HandoffBox v-if="view.handoff" :handoff="view.handoff" />
-      <PurchaseSheet v-if="s.sheetProduct && s.catalog" :key="s.sheetProduct.code" :product="s.sheetProduct" :sizes="s.catalog.sizes"
+      <ContactForm v-if="view.contact" :saved="view.contact.saved" :busy="s.busy" @save="s.saveContact" />
+      <PurchaseSheet v-if="s.sheetProduct" :key="s.sheetProduct.code" :product="s.sheetProduct" :sizes="s.sheetProduct.sizes"
         :default-size="view.default_size" :busy="s.busy" @buy="s.buy" @close="s.closeSheet()" />
       <button v-if="view.screen === 'service'" class="switch" type="button" @click="s.browseShop(true)">새 축구화 찾기</button>
       <button v-else-if="s.browsing" class="switch" type="button" @click="s.browseShop(false)">내 주문으로 돌아가기</button>

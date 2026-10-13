@@ -12,6 +12,11 @@ export interface Product {
   image: string | null
 }
 
+/** 카탈로그의 상품: 재고가 있는 사이즈를 함께 준다 */
+export interface CatalogProduct extends Product {
+  sizes: number[]
+}
+
 export interface ProductCard extends Product {
   label: string | null
   quiet: boolean
@@ -19,6 +24,8 @@ export interface ProductCard extends Product {
   trade: string[] | null
   why: string
   buyable: boolean
+  sizes: number[] // 재고가 있는 사이즈
+  size_note: string | null // 원하는 사이즈가 없을 때 (예: 270mm 품절)
 }
 
 export interface Step {
@@ -100,6 +107,7 @@ export interface View {
   source: string | null
   placeholder: string
   default_size: number
+  contact: { saved: string | null } | null // 사람이 이어받는 건이면 연락받을 곳을 묻는다
 }
 
 export interface Account {
@@ -116,8 +124,7 @@ export interface Envelope {
 }
 
 export interface Catalog {
-  products: Product[]
-  sizes: number[]
+  products: CatalogProduct[]
   demo_accounts: { id: string; name: string; desc: string }[]
   policy: Record<string, string | number>
   shop_home: View
@@ -139,10 +146,31 @@ export interface AdminOrder {
   status: string
   note: string | null
   exchanges: number
+  code: string
+  size: number
   ordered_at: string
   shipped_at: string | null
   delivered_at: string | null
-  actions: { to: string; label: string }[]
+  actions: { to: string; label: string; needs_size: boolean }[]
+}
+
+export interface AdminProduct {
+  code: string
+  name: string
+  stud: string
+  width: string
+  price: number
+  active: boolean
+  stock: { size: number; qty: number }[]
+}
+
+export interface AdminCustomer {
+  id: string
+  name: string
+  contact: string | null
+  created_at: string | null
+  has_password: boolean
+  orders: number
 }
 
 export interface AdminHandoff {
@@ -153,6 +181,7 @@ export interface AdminHandoff {
   account_id: string | null
   account_name: string | null
   order_id: string | null
+  contact: string | null
   summary: string
   status: 'open' | 'done'
   resolved_at: string | null
@@ -174,4 +203,6 @@ export interface AdminBoard {
   handoffs: AdminHandoff[]
   done: AdminHandoff[]
   orders: AdminOrder[]
+  products: AdminProduct[]
+  customers: AdminCustomer[]
 }

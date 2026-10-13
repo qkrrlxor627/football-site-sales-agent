@@ -19,7 +19,6 @@ STUD_INFO = {
     "IC": "실내 체육관용 평평한 창",
     "HG": "단단한 흙·맨땅용 짧고 단단한 스터드",
 }
-SIZES = list(range(220, 315, 5))   # 추출기가 받는 범위(220~310)와 같게
 DEFAULT_SIZE = 270
 HOME_CODES = ["S-04", "S-08", "S-02"]
 MAX_BLUR = 12
@@ -166,7 +165,11 @@ def result_view(s: dict) -> dict:
         else:
             label, quiet = None, False
         cards.append(product_card(x["code"], p, label, quiet, x["trade"], buyable=done))
+    health = route == "escalate" and reason == "health"
+    if health and not cards:   # 추천을 멈춘 화면: 빈 칸 대신 멈춰 선 진열대를 보여준다
+        cards = [product_card(code, {}) for code in HOME_CODES if code in {x["code"] for x in PRODUCTS}]
     count = ({"prefix": "조건을 전부 맞추는 신발 0종 → ", "strong": f'가장 가까운 {len(cards)}켤레', "suffix": ""} if route == "alternative"
+             else {"prefix": "추천을 잠시 멈췄어요", "strong": "", "suffix": ""} if health
              else {"prefix": f"전체 {len(PRODUCTS)}종 → ", "strong": f'{s.get("pool", len(PRODUCTS))}종', "suffix": " 남음"})
     handoff = None
     if route == "escalate":
@@ -201,11 +204,11 @@ def view_for(s: dict) -> dict:
     return shop_home()
 
 
-def catalog(demo: bool = True) -> dict:
-    """화면이 처음 한 번 받아 두는 고정 데이터. 데모 모드가 아니면 데모 계정 목록은 비운다."""
+def catalog(demo: bool = True, stock: Optional[dict] = None) -> dict:
+    """화면이 처음 받아 두는 데이터. 데모 모드가 아니면 데모 계정 목록은 비운다. sizes는 재고가 있는 사이즈만."""
+    stock = stock or {}
     return {
-        "products": [product_info(p["code"]) for p in PRODUCTS],
-        "sizes": SIZES,
+        "products": [{**product_info(p["code"]), "sizes": [z for z, q in sorted(stock.get(p["code"], {}).items()) if q > 0]} for p in PRODUCTS],
         "demo_accounts": [{"id": k, "name": v["name"], "desc": ACCOUNT_DESC.get(k, "")} for k, v in DEMO_ACCOUNTS.items()] if demo else [],
         "policy": POLICY,
         "shop_home": shop_home(),

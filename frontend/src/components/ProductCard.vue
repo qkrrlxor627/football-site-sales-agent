@@ -22,7 +22,10 @@ defineEmits<{ buy: [code: string] }>()
       <span v-for="t in card.trade" :key="t" class="chip">{{ t }}</span>
     </div>
     <div v-else class="why">{{ card.why }}</div>
-    <button v-if="card.buyable" class="buy" type="button" @click="$emit('buy', card.code)">구매하기</button>
+    <div v-if="card.size_note" class="soldout">{{ card.size_note }}</div>
+    <button v-if="card.buyable" class="buy" type="button" :disabled="!card.sizes.length" @click="$emit('buy', card.code)">
+      {{ card.sizes.length ? '구매하기' : '품절' }}
+    </button>
   </article>
 </template>
 
@@ -32,4 +35,5 @@ defineEmits<{ buy: [code: string] }>()
 .trade { display: flex; flex-direction: column; gap: 4px; }
 .chip { font-size: 12.5px; line-height: 1.4; padding: 4px 8px; border-radius: 8px; background: color-mix(in srgb, var(--g-yellow) 14%, transparent); }
 .buy { margin-top: 6px; }
+.soldout { font-size: 12.5px; font-weight: 600; color: var(--g-red); }
 </style>

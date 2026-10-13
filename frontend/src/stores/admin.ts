@@ -29,7 +29,19 @@ export const useAdmin = defineStore('admin', () => {
   return {
     board, busy, error,
     load: (quiet = false) => run(() => api.adminBoard(), quiet),
-    setStatus: (orderId: string, to: string, note?: string) => run(() => api.adminSetStatus(orderId, to, note)),
+    setStatus: (orderId: string, to: string, note?: string, newSize?: number) => run(() => api.adminSetStatus(orderId, to, note, newSize)),
+    updateProduct: (code: string, change: { price?: number; active?: boolean; stock?: Record<number, number> }) =>
+      run(() => api.adminUpdateProduct(code, change)),
+    /** 임시 비밀번호를 만들어 돌려준다 (화면에 한 번 보여주고 저장하지 않는다). 실패하면 null. */
+    resetPassword: async (userId: string): Promise<string | null> => {
+      error.value = null
+      try {
+        return (await api.adminResetPassword(userId)).temp_password
+      } catch (err) {
+        error.value = err instanceof ApiError ? err.message : '알 수 없는 문제가 생겼어요.'
+        return null
+      }
+    },
     resolve: (handoffId: number, note: string) => run(() => api.adminResolve(handoffId, note)),
     clear: () => {
       board.value = null

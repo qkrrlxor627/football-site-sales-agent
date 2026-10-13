@@ -18,6 +18,7 @@ services:
       PITCHROOM_ADMIN_PASSWORD: ${PITCHROOM_ADMIN_PASSWORD:-}
       PITCHROOM_DEMO: ${PITCHROOM_DEMO:-0}                    # 1이면 비밀번호 없는 데모 계정 4개를 켠다
       PITCHROOM_COOKIE_SECURE: ${PITCHROOM_COOKIE_SECURE:-0}  # HTTPS 뒤에 둘 때 1
+      PITCHROOM_NOTIFY_WEBHOOK: ${PITCHROOM_NOTIFY_WEBHOOK:-}   # 넘어온 건·새 주문 알림 (Slack·Discord 웹훅)
       PITCHROOM_LOG_LEVEL: ${PITCHROOM_LOG_LEVEL:-INFO}
     volumes:
       - pitchroom-data:/data

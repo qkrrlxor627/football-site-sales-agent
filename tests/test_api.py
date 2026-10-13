@@ -153,7 +153,7 @@ def test_errors_share_one_shape(client, path, payload, status, code):
 def test_order_validation(client, payload):
     client.post("/api/login", json={"user_id": "minsu"})
     r = client.post("/api/orders", json=payload)
-    assert r.status_code == 422 and r.json()["error"]["code"] == "invalid_input"
+    assert r.status_code in (409, 422) and r.json()["error"]["code"] in ("invalid_input", "out_of_stock")
     assert len(client.get("/api/session").json()["account"]["orders"]) == 1
 
 
@@ -264,7 +264,7 @@ def test_new_order_flows_to_delivery_and_then_exchange(db):
         login_admin(owner)
         board = owner.get("/api/admin/board").json()
         mine = next(o for o in board["orders"] if o["id"] == oid)
-        assert mine["account_name"] == "태호" and mine["actions"] == [{"to": "배송중", "label": "출고 처리"}]
+        assert mine["account_name"] == "태호" and mine["actions"] == [{"to": "배송중", "label": "출고 처리", "needs_size": False}]
         assert owner.post(f"/api/admin/orders/{oid}/status", json={"to": "배송완료"}).json()["error"]["code"] == "bad_transition"   # 단계를 건너뛸 수 없다
         owner.post(f"/api/admin/orders/{oid}/status", json={"to": "배송중"})
         assert "배송 중" in say(shopper, "언제 와요?")["view"]["headline"]         # 고객 답변이 바뀐 상태를 바로 따른다
@@ -275,9 +275,14 @@ def test_new_order_flows_to_delivery_and_then_exchange(db):
         say(shopper, "사이즈가 작아요")
         done = say(shopper, "실내에서만 신어봤어요")
         assert done["view"]["news"]["verdict"] == "자동 접수"
-        board = owner.post(f"/api/admin/orders/{oid}/status", json={"to": "배송완료"}).json()   # 교환 상품 도착 처리
+        assert owner.post(f"/api/admin/orders/{oid}/status", json={"to": "배송완료"}).json()["error"]["code"] == "size_required"
+        board = owner.post(f"/api/admin/orders/{oid}/status", json={"to": "배송완료", "new_size": 275}).json()   # 275mm로 바꿔 보냄
+        assert board["error"]["code"] == "out_of_stock"                                                          # S-08 275mm는 품절
+        board = owner.post(f"/api/admin/orders/{oid}/status", json={"to": "배송완료", "new_size": 280}).json()
         o = next(o for o in board["orders"] if o["id"] == oid)
-        assert (o["status"], o["exchanges"], o["note"]) == ("배송완료", 1, "교환 상품이 도착했어요.")
+        assert (o["status"], o["exchanges"], o["note"], o["size"]) == ("배송완료", 1, "교환 상품이 도착했어요.", 280)
+        stock = {x["size"]: x["qty"] for x in next(p for p in board["products"] if p["code"] == "S-08")["stock"]}
+        assert (stock[270], stock[280]) == (3, 1)   # 270은 주문 때 -1, 돌아와서 +1 / 280은 -1
         assert owner.post("/api/admin/orders/PR-9999/status", json={"to": "배송중"}).status_code == 404
 
 
@@ -329,3 +334,181 @@ def test_reseeding_demo_keeps_real_customers(db):
     Store(db).seed()
     acc = Store(db).get_account("taeho")
     assert acc and len(acc["orders"]) == 1 and Store(db).get_account("jiwoo")["orders"][0]["status"] == "배송완료"
+
+
+# ---------- 재고 · 가격 ----------
+def stock_of(board, code):
+    return {x["size"]: x["qty"] for x in next(p for p in board["products"] if p["code"] == code)["stock"]}
+
+
+def test_last_pair_cannot_be_sold_twice(db):
+    app = app_with(db)
+    with TestClient(app) as a, TestClient(app) as b, TestClient(app) as owner:
+        a.post("/api/login", json={"user_id": "minsu"}); b.post("/api/login", json={"user_id": "jiwoo"})
+        assert a.post("/api/orders", json={"code": "S-01", "size": 250}).status_code == 200   # S-01 250mm는 1켤레
+        r = b.post("/api/orders", json={"code": "S-01", "size": 250})
+        assert r.status_code == 409 and r.json()["error"] == {"code": "out_of_stock", "message": "250mm는 품절이에요. 다른 사이즈를 골라 주세요."}
+        assert len(b.get("/api/session").json()["account"]["orders"]) == 1
+        login_admin(owner)
+        assert stock_of(owner.get("/api/admin/board").json(), "S-01")[250] == 0
+
+
+def test_cards_and_catalog_show_only_sizes_in_stock(client):
+    cat = {p["code"]: p["sizes"] for p in client.get("/api/catalog").json()["products"]}
+    assert cat["S-01"] == [250, 255, 260, 265, 275, 280]          # 270, 285, 290 품절
+    for t in ["천연잔디", "좁아요", "상관없어요"]:
+        say(client, t)
+    view = say(client, "270 신어요")["view"]
+    first = view["shelf"]["cards"][0]
+    assert first["code"] == "S-03" and first["sizes"] == [255, 260, 265, 270, 275] and first["size_note"] is None
+    elite = next(c for c in view["shelf"]["cards"] if c["code"] == "S-01")
+    assert elite["size_note"] == "270mm 품절"
+
+
+def test_owner_changes_price_stock_and_visibility(db):
+    app = app_with(db)
+    with TestClient(app) as shopper, TestClient(app) as owner:
+        login_admin(owner)
+        board = owner.post("/api/admin/products/S-07", json={"price": 99000, "stock": {"250": 0, "270": 7}}).json()
+        item = next(p for p in board["products"] if p["code"] == "S-07")
+        assert item["price"] == 99000 and stock_of(board, "S-07")[250] == 0 and stock_of(board, "S-07")[270] == 7
+        for t in ["풋살장", "발볼 넓어요"]:
+            say(shopper, t)
+        view = say(shopper, "15만원")["view"]
+        card = view["shelf"]["cards"][0]
+        assert (card["code"], card["price"]) == ("S-07", 99000) and 250 not in card["sizes"]   # 바꾼 값이 바로 추천에 쓰인다
+
+        owner.post("/api/admin/products/S-07", json={"active": False})
+        shopper.post("/api/reset")
+        for t in ["풋살장", "발볼 넓어요"]:
+            say(shopper, t)
+        codes = [c["code"] for c in say(shopper, "15만원")["view"]["shelf"]["cards"]]
+        assert "S-07" not in codes                                                          # 숨긴 상품은 추천되지 않고
+        shopper.post("/api/login", json={"user_id": "minsu", "keep": True})
+        assert shopper.post("/api/orders", json={"code": "S-07", "size": 270}).json()["error"]["code"] == "not_for_sale"   # 살 수도 없다
+        assert "S-07" not in [p["code"] for p in shopper.get("/api/catalog").json()["products"]]
+
+    with TestClient(app_with(db)) as again:   # 다시 띄워도 유지
+        login_admin(again)
+        item = next(p for p in again.get("/api/admin/board").json()["products"] if p["code"] == "S-07")
+        assert (item["price"], item["active"]) == (99000, False)
+
+
+@pytest.mark.parametrize("payload, status", [
+    ({"price": 500}, 422), ({"price": 9_000_000}, 422), ({"stock": {"270": -1}}, 422), ({"stock": {"270": 1000}}, 422),
+    ({"stock": {"333": 1}}, 422),
+])
+def test_product_update_validation(db, payload, status):
+    with TestClient(app_with(db)) as owner:
+        login_admin(owner)
+        assert owner.post("/api/admin/products/S-07", json=payload).status_code == status
+        assert owner.post("/api/admin/products/S-99", json={"price": 10000}).status_code == 404
+
+
+def test_return_puts_the_pair_back_in_stock(db):
+    app = app_with(db)
+    with TestClient(app) as shopper, TestClient(app) as owner:
+        shopper.post("/api/login", json={"user_id": "jiwoo"})          # S-08 270mm, 받은 지 3일
+        say(shopper, "반품하고 싶어요"); say(shopper, "안 신었어요")
+        login_admin(owner)
+        before = stock_of(owner.get("/api/admin/board").json(), "S-08")[270]
+        board = owner.post("/api/admin/orders/PR-0002/status", json={"to": "반품 완료"}).json()
+        assert stock_of(board, "S-08")[270] == before + 1
+        body = shopper.post("/api/reset").json()
+        assert body["account"]["orders"][0]["status"] == "반품 완료" and "반품이 완료됐어요" in body["view"]["headline"]
+
+
+# ---------- 연락처 · 알림 ----------
+def test_guest_leaves_contact_on_a_handoff(db):
+    app = app_with(db)
+    with TestClient(app) as guest, TestClient(app) as owner:
+        assert guest.post("/api/contact", json={"contact": "010-1234-5678"}).json()["error"]["code"] == "nothing_to_attach"
+        view = say(guest, "발목 수술한 적 있어요")["view"]
+        assert view["contact"] == {"saved": None}
+        assert guest.post("/api/contact", json={"contact": "연락주세요"}).status_code == 422
+        view = guest.post("/api/contact", json={"contact": " 010-1234-5678 "}).json()["view"]
+        assert view["contact"] == {"saved": "010-1234-5678"} and view["route"] == "escalate"
+        login_admin(owner)
+        assert owner.get("/api/admin/board").json()["handoffs"][0]["contact"] == "010-1234-5678"
+
+
+def test_account_contact_is_remembered_for_later_handoffs(db):
+    app = app_with(db)
+    with TestClient(app) as shopper, TestClient(app) as owner:
+        shopper.post("/api/login", json={"user_id": "hyun"})
+        say(shopper, "교환하고 싶어요")
+        shopper.post("/api/contact", json={"contact": "hyun@example.com"})
+        shopper.post("/api/reset")
+        view = say(shopper, "무릎 인대를 다쳤어요")["view"]
+        assert view["contact"] == {"saved": "hyun@example.com"}            # 다시 묻지 않는다
+        login_admin(owner)
+        board = owner.get("/api/admin/board").json()
+        assert {h["contact"] for h in board["handoffs"]} == {"hyun@example.com"}
+        assert next(c for c in board["customers"] if c["id"] == "hyun")["contact"] == "hyun@example.com"
+        assert say(shopper, "인조잔디")["view"]["contact"] is None           # 넘긴 건이 아니면 묻지 않는다
+
+
+def test_webhook_gets_handoffs_and_orders_without_customer_text(db):
+    import json as _json, threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    got, seen = [], threading.Event()
+
+    class Hook(BaseHTTPRequestHandler):
+        def do_POST(self):
+            got.append(_json.loads(self.rfile.read(int(self.headers["content-length"]))))
+            self.send_response(204); self.end_headers()
+            if len(got) == 2:
+                seen.set()
+
+        def log_message(self, *a):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Hook)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with TestClient(app_with(db, notify_webhook=f"http://127.0.0.1:{server.server_port}/hook")) as c:
+            say(c, "족저근막염이 있는데 괜찮을까요")
+            c.post("/api/login", json={"user_id": "minsu"})
+            c.post("/api/orders", json={"code": "S-05", "size": 270})
+            assert seen.wait(5)
+    finally:
+        server.shutdown()
+    texts = sorted(m["text"] for m in got)
+    assert texts[0].startswith("[PITCHROOM] 넘어온 건: 발 건강 상담 · 비로그인 고객") and "족저근막" not in texts[0]   # 건강 내용은 밖으로 안 나간다
+    assert texts[1].startswith("[PITCHROOM] 새 주문 PR-0006") and got[0]["content"] == got[0]["text"]
+
+
+def test_dead_webhook_does_not_break_the_request(db):
+    with TestClient(app_with(db, notify_webhook="http://127.0.0.1:9/nope")) as c:
+        assert say(c, "발목 수술한 적 있어요")["view"]["route"] == "escalate"
+
+
+# ---------- 비밀번호 변경 · 재발급 ----------
+def test_customer_changes_password(client):
+    client.post("/api/signup", json={"user_id": "taeho", "name": "태호", "password": "correct-horse"})
+    assert client.post("/api/password", json={"current": "wrong-one", "new": "battery-staple"}).json()["error"]["code"] == "bad_credentials"
+    assert client.post("/api/password", json={"current": "correct-horse", "new": "short"}).status_code == 422
+    assert client.post("/api/password", json={"current": "correct-horse", "new": "battery-staple"}).json() == {"ok": True}
+    client.post("/api/logout")
+    assert client.post("/api/login", json={"user_id": "taeho", "password": "correct-horse"}).status_code == 401
+    assert client.post("/api/login", json={"user_id": "taeho", "password": "battery-staple"}).status_code == 200
+    client.post("/api/logout")
+    assert client.post("/api/password", json={"current": "x", "new": "battery-staple"}).status_code == 401
+    client.post("/api/login", json={"user_id": "jiwoo"})
+    assert client.post("/api/password", json={"current": "", "new": "battery-staple"}).json()["error"]["code"] == "no_password"
+
+
+def test_owner_issues_a_temporary_password(db):
+    app = app_with(db)
+    with TestClient(app) as shopper, TestClient(app) as owner:
+        shopper.post("/api/signup", json={"user_id": "taeho", "name": "태호", "password": "correct-horse"})
+        shopper.post("/api/logout")
+        assert shopper.post("/api/admin/customers/taeho/reset-password").status_code == 401
+        login_admin(owner)
+        assert next(c for c in owner.get("/api/admin/board").json()["customers"] if c["id"] == "taeho")["has_password"]
+        temp = owner.post("/api/admin/customers/taeho/reset-password").json()["temp_password"]
+        assert len(temp) >= 10
+        assert shopper.post("/api/login", json={"user_id": "taeho", "password": "correct-horse"}).status_code == 401
+        assert shopper.post("/api/login", json={"user_id": "taeho", "password": temp}).status_code == 200
+        for other in ["admin", "jiwoo", "nobody"]:   # 관리자·데모 계정·없는 계정은 안 된다
+            assert owner.post(f"/api/admin/customers/{other}/reset-password").status_code == 404

@@ -22,17 +22,19 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import config, extract
+from . import config, extract, notify
 from . import tools as tools_mod
 from .data import BY_CODE, order_label
 from .graph import build_graph
 from .store import HANDOFF_KIND, Store, StoreError, order_actions, order_title
-from .views import IMAGE_DIR, SIZES, account_view, catalog, service_home, slots, view_for
+from .views import IMAGE_DIR, account_view, catalog, service_home, slots, view_for
 
 log = logging.getLogger("pitchroom.api")
 DIST_DIR = config.ROOT / "frontend" / "dist"
 MAX_TEXT = 500
 USER_ID = re.compile(r"^[a-z0-9_]{3,20}$")
+PHONE = re.compile(r"^[0-9+\-() ]{9,20}$")
+EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
 FIELD_MESSAGE = {
     "text": f"메시지는 1~{MAX_TEXT}자로 입력해 주세요.",
     "user_id": "아이디는 영문 소문자·숫자·밑줄 3~20자로 입력해 주세요.",
@@ -42,6 +44,12 @@ FIELD_MESSAGE = {
     "size": "사이즈를 다시 골라 주세요.",
     "to": "바꿀 상태를 다시 골라 주세요.",
     "note": "메모는 200자 이내로 입력해 주세요.",
+    "contact": "전화번호나 이메일을 입력해 주세요. (예: 010-1234-5678)",
+    "price": "가격은 1,000원~5,000,000원 사이로 입력해 주세요.",
+    "stock": "재고는 0~999 사이 숫자로 입력해 주세요.",
+    "new_size": "교환해 보낼 사이즈를 골라 주세요.",
+    "current": "지금 비밀번호를 입력해 주세요.",
+    "new": "새 비밀번호는 8~72자로 입력해 주세요.",
 }
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -106,6 +114,22 @@ class OrderIn(BaseModel):
 class TransitionIn(BaseModel):
     to: str = Field(max_length=20)
     note: Optional[str] = Field(None, max_length=200)
+    new_size: Optional[int] = None   # 교환 완료 처리할 때 보내는 사이즈
+
+
+class ContactIn(BaseModel):
+    contact: str = Field(max_length=60)
+
+
+class PasswordIn(BaseModel):
+    current: str = Field(max_length=72)
+    new: str = Field(max_length=200)
+
+
+class ProductIn(BaseModel):
+    price: Optional[int] = Field(None, ge=1000, le=5_000_000)
+    active: Optional[bool] = None
+    stock: Optional[dict[int, int]] = None
 
 
 class ResolveIn(BaseModel):
@@ -201,8 +225,24 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
             state = {**state, "account": acc}
         return state
 
-    def envelope(state: dict, view: Optional[dict] = None, **extra) -> dict:
-        return {"account": account_view(state.get("account")), "view": view or view_for(state), **extra}
+    def in_stock(code: str, stock: dict) -> list[int]:
+        return [size for size, qty in sorted(stock.get(code, {}).items()) if qty > 0]
+
+    def envelope(request: Request, state: dict, view: Optional[dict] = None, **extra) -> dict:
+        """화면 응답. 그래프가 모르는 것(재고, 남긴 연락처)은 여기서 붙인다."""
+        view = view or view_for(state)
+        acc = state.get("account")
+        if view["shelf"]["kind"] == "products":
+            stock, want = store.stock_map(), (state.get("profile") or {}).get("size")
+            for card in view["shelf"]["cards"]:
+                card["sizes"] = in_stock(card["code"], stock)
+                card["size_note"] = (None if card["sizes"] else "전 사이즈 품절") if not want or want in card["sizes"] else f"{want}mm 품절"
+        if view["route"] == "escalate":   # 사람이 이어받는 건: 연락받을 곳을 묻는다
+            thread = request.session.get("thread")
+            view["contact"] = {"saved": (thread and store.thread_contact(thread)) or (acc and store.get_contact(acc["id"])) or None}
+        else:
+            view["contact"] = None
+        return {"account": account_view(acc), "view": view, **extra}
 
     def client_ip(request: Request) -> str:
         return request.client.host if request.client else "unknown"
@@ -216,7 +256,7 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
         thread = current(request)[0] if keep else new_thread(request)
         request.session["user"] = user
         with lock_for(thread):
-            return envelope(sync_account(request, thread, user))
+            return envelope(request, sync_account(request, thread, user))
 
     def require_admin(request: Request) -> dict:
         user = request.session.get("user")
@@ -244,9 +284,13 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
             "discussion": [{"agent": m["agent"], "text": m["text"], "internal": m["visibility"] == "internal"}
                            for m in state.get("discussion", []) if m["turn"] == state["turn"]],
         }
-        made = store.add_handoff(kind if kind in HANDOFF_KIND else "review", summary, detail, thread,
-                                 account_id=acc["id"] if acc else None, order_id=order["id"] if order else None)
+        kind = kind if kind in HANDOFF_KIND else "review"
+        made = store.add_handoff(kind, summary, detail, thread, account_id=acc["id"] if acc else None, order_id=order["id"] if order else None)
+        if made and acc and store.get_contact(acc["id"]):
+            store.set_handoff_contact(thread, store.get_contact(acc["id"]))
         if made:
+            who = f'{acc["name"]}({acc["id"]})' if acc else "비로그인 고객"
+            notify.send(settings.notify_webhook, f'[PITCHROOM] 넘어온 건: {HANDOFF_KIND[kind]} · {who}' + (f' · {order["id"]}' if order else "") + " — 관리 화면에서 확인해 주세요.")
             log.info("handoff id=%s kind=%s user=%s order=%s", made, kind, acc["id"] if acc else "-", order["id"] if order else "-")
 
     # ---------- 고객 라우트 ----------
@@ -257,13 +301,13 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
 
     @app.get("/api/catalog")
     def get_catalog():
-        return catalog(settings.demo)
+        return catalog(settings.demo, store.stock_map())
 
     @app.get("/api/session")
     def get_session(request: Request):
         thread, user = current(request)
         with lock_for(thread):
-            return envelope(sync_account(request, thread, user))
+            return envelope(request, sync_account(request, thread, user))
 
     @app.post("/api/chat")
     def chat(body: ChatIn, request: Request):
@@ -284,7 +328,7 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
             store.touch_thread(thread)
         log.info("chat thread=%s user=%s route=%s/%s source=%s chars=%d %.0fms", thread[:8], user or "-", state.get("route"),
                  state.get("reason"), state.get("source"), len(text), (time.perf_counter() - started) * 1000)
-        return envelope(state)
+        return envelope(request, state)
 
     @app.post("/api/login")
     def login(body: LoginIn, request: Request):
@@ -319,14 +363,14 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
     def logout(request: Request):
         request.session.pop("user", None)
         thread = new_thread(request)
-        return envelope(sync_account(request, thread, None))
+        return envelope(request, sync_account(request, thread, None))
 
     @app.post("/api/reset")
     def reset(request: Request):
         """대화만 처음으로. 로그인은 유지한다."""
         user = request.session.get("user")
         thread = new_thread(request)
-        return envelope(sync_account(request, thread, user))
+        return envelope(request, sync_account(request, thread, user))
 
     @app.post("/api/orders")
     def order(body: OrderIn, request: Request):
@@ -335,21 +379,56 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
             raise ApiError(401, "login_required", "구매하려면 로그인해 주세요.")
         if body.code not in BY_CODE:
             raise ApiError(422, "invalid_input", FIELD_MESSAGE["code"])
-        if body.size not in SIZES:
-            raise ApiError(422, "invalid_input", FIELD_MESSAGE["size"])
         throttle(request, "chat-ip", settings.ip_per_minute)
         throttle(request, "order", 10, key=user)
         with lock_for(thread):
-            o = store.add_order(user, body.code, body.size)
+            try:
+                o = store.add_order(user, body.code, body.size)   # 재고 확인과 차감을 한 번에
+            except StoreError as err:
+                raise ApiError(409, err.code, err.message)
             state = sync_account(request, thread, user)
+        notify.send(settings.notify_webhook, f'[PITCHROOM] 새 주문 {o["id"]}: {order_label(o)} — 출고 대기')
         log.info("order thread=%s user=%s id=%s code=%s size=%d", thread[:8], user, o["id"], o["code"], o["size"])
         headline = f'주문했어요. {o["id"]} · {order_label(o)}, 지금은 결제 완료 상태예요.'
-        return envelope(state, service_home(state["account"], headline), order_id=o["id"])
+        return envelope(request, state, service_home(state["account"], headline), order_id=o["id"])
+
+    @app.post("/api/contact")
+    def contact(body: ContactIn, request: Request):
+        """사람이 이어받는 건에 연락받을 곳을 남긴다. 로그인했으면 계정에도 저장해 다음부터 묻지 않는다."""
+        value = body.contact.strip()
+        if not (PHONE.match(value) or EMAIL.match(value)):
+            raise ApiError(422, "invalid_input", FIELD_MESSAGE["contact"])
+        thread, user = current(request)
+        throttle(request, "chat-ip", settings.ip_per_minute)
+        with lock_for(thread):
+            state = sync_account(request, thread, user)
+            attached = store.set_handoff_contact(thread, value)
+            if state.get("account"):
+                store.set_contact(state["account"]["id"], value)
+            elif not attached:
+                raise ApiError(409, "nothing_to_attach", "연락처를 남길 문의가 없어요.")
+            return envelope(request, state)
+
+    @app.post("/api/password")
+    def change_password(body: PasswordIn, request: Request):
+        user = request.session.get("user")
+        if not user:
+            raise ApiError(401, "login_required", "로그인해 주세요.")
+        if not 8 <= len(body.new) <= 72:
+            raise ApiError(422, "invalid_input", FIELD_MESSAGE["new"])
+        throttle(request, "auth", settings.auth_per_minute)
+        try:
+            store.change_password(user, body.current, body.new)
+        except StoreError as err:
+            raise ApiError(401 if err.code == "bad_credentials" else 409, err.code, err.message)
+        log.info("password changed user=%s", user)
+        return {"ok": True}
 
     # ---------- 관리(사장님) 라우트 ----------
     def admin_order(o: dict) -> dict:
         return {"id": o["id"], "account_id": o["account_id"], "account_name": o.get("account_name"), "title": order_title(o),
                 "status": o["status"], "note": o["note"], "exchanges": o["exchanges"], "ordered_at": o["ordered_at"],
+                "size": o["size"], "code": o["code"],
                 "shipped_at": o["shipped_at"], "delivered_at": o["delivered_at"], "actions": order_actions(o["status"])}
 
     def admin_board() -> dict:
@@ -358,6 +437,8 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
             "handoffs": [{**h, "kind_label": HANDOFF_KIND.get(h["kind"], h["kind"])} for h in store.list_handoffs("open")],
             "done": [{**h, "kind_label": HANDOFF_KIND.get(h["kind"], h["kind"])} for h in store.list_handoffs("done")[:20]],
             "orders": [admin_order(o) for o in store.list_orders()],
+            "products": store.list_products(),
+            "customers": store.list_customers(),
         }
 
     @app.get("/api/admin/board")
@@ -369,9 +450,9 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
     def set_status(order_id: str, body: TransitionIn, request: Request):
         admin = require_admin(request)
         try:
-            o = store.transition_order(order_id, body.to, body.note)
+            o = store.transition_order(order_id, body.to, body.note, body.new_size)
         except StoreError as err:
-            raise ApiError(404 if err.code == "unknown_order" else 409, err.code, err.message)
+            raise ApiError({"unknown_order": 404, "size_required": 422}.get(err.code, 409), err.code, err.message)
         log.info("admin=%s order=%s → %s", admin["id"], order_id, o["status"])
         return admin_board()
 
@@ -384,6 +465,30 @@ def create_app(db_path: Optional[str] = None, settings: Optional[config.Settings
             raise ApiError(404, err.code, err.message)
         log.info("admin=%s handoff=%s 처리", admin["id"], handoff_id)
         return admin_board()
+
+    @app.post("/api/admin/products/{code}")
+    def update_product(code: str, body: ProductIn, request: Request):
+        """가격, 판매 여부, 사이즈별 재고를 바꾼다. 바꾼 값은 다음 추천부터 바로 쓰인다."""
+        admin = require_admin(request)
+        if body.stock and any(not 0 <= q <= 999 for q in body.stock.values()):
+            raise ApiError(422, "invalid_input", FIELD_MESSAGE["stock"])
+        try:
+            store.update_product(code, body.price, body.active, body.stock)
+        except StoreError as err:
+            raise ApiError(404 if err.code == "unknown_product" else 422, err.code, err.message)
+        log.info("admin=%s product=%s price=%s active=%s stock=%s", admin["id"], code, body.price, body.active, body.stock)
+        return admin_board()
+
+    @app.post("/api/admin/customers/{user_id}/reset-password")
+    def reset_password(user_id: str, request: Request):
+        """고객이 비밀번호를 잊었을 때: 임시 비밀번호를 만들어 사장님 화면에 한 번 보여준다 (사장님이 고객에게 전한다)."""
+        admin = require_admin(request)
+        try:
+            temp = store.reset_password(user_id)
+        except StoreError as err:
+            raise ApiError(404, err.code, err.message)
+        log.info("admin=%s reset password for user=%s", admin["id"], user_id)
+        return {"temp_password": temp, "user_id": user_id}
 
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
     def unknown_api(rest: str):

@@ -50,8 +50,14 @@ export const api = {
   logout: () => request<Envelope>('POST', '/api/logout'),
   reset: () => request<Envelope>('POST', '/api/reset'),
   order: (code: string, size: number) => request<Envelope>('POST', '/api/orders', { code, size }),
+  contact: (contact: string) => request<Envelope>('POST', '/api/contact', { contact }),
+  changePassword: (current: string, next: string) => request<{ ok: boolean }>('POST', '/api/password', { current, new: next }),
   adminBoard: () => request<AdminBoard>('GET', '/api/admin/board'),
-  adminSetStatus: (orderId: string, to: string, note?: string) =>
-    request<AdminBoard>('POST', `/api/admin/orders/${encodeURIComponent(orderId)}/status`, { to, note: note || undefined }),
+  adminSetStatus: (orderId: string, to: string, note?: string, newSize?: number) =>
+    request<AdminBoard>('POST', `/api/admin/orders/${encodeURIComponent(orderId)}/status`, { to, note: note || undefined, new_size: newSize }),
+  adminUpdateProduct: (code: string, change: { price?: number; active?: boolean; stock?: Record<number, number> }) =>
+    request<AdminBoard>('POST', `/api/admin/products/${encodeURIComponent(code)}`, change),
+  adminResetPassword: (userId: string) =>
+    request<{ temp_password: string; user_id: string }>('POST', `/api/admin/customers/${encodeURIComponent(userId)}/reset-password`, {}),
   adminResolve: (handoffId: number, note: string) => request<AdminBoard>('POST', `/api/admin/handoffs/${handoffId}/resolve`, { note }),
 }

@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from .config import DB_PATH
-from .data import BY_CODE, DEMO_ACCOUNTS, day_iso, make_account, order_label
+from .data import BASE_PRODUCTS, BY_CODE, DEMO_ACCOUNTS, STOCK_SEED, STOCK_SIZES, apply_catalog, day_iso, make_account, order_label
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, name TEXT NOT NULL);
@@ -49,9 +49,14 @@ CREATE TABLE IF NOT EXISTS handoffs (
 );
 CREATE INDEX IF NOT EXISTS handoffs_status ON handoffs(status);
 CREATE TABLE IF NOT EXISTS threads (thread_id TEXT PRIMARY KEY, last_seen TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS products (code TEXT PRIMARY KEY, price INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS stock (code TEXT NOT NULL, size INTEGER NOT NULL, qty INTEGER NOT NULL, PRIMARY KEY (code, size));
 """
 # 나중에 추가된 열. 예전 DB 파일에도 그대로 붙는다.
-ACCOUNT_COLUMNS = {"password_hash": "TEXT", "role": "TEXT NOT NULL DEFAULT 'customer'", "created_at": "TEXT"}
+ADDED_COLUMNS = {
+    "accounts": {"password_hash": "TEXT", "role": "TEXT NOT NULL DEFAULT 'customer'", "created_at": "TEXT", "contact": "TEXT"},
+    "handoffs": {"contact": "TEXT"},
+}
 ORDER_COLS = ["id", "code", "size", "status", "exchanges", "note", "ordered_at", "shipped_at", "delivered_at"]
 
 # 사장님이 주문을 다음 단계로 넘기는 규칙: 지금 상태 → [(다음 상태, 버튼 이름, 고객에게 보일 안내)]
@@ -102,13 +107,19 @@ class Store:
         db = sqlite3.connect(self.path, timeout=10)
         try:
             db.executescript(SCHEMA)   # executescript는 스스로 커밋하므로 _tx 밖에서 돌린다
-            have = {r[1] for r in db.execute("PRAGMA table_info(accounts)")}
-            for col, decl in ACCOUNT_COLUMNS.items():
-                if col not in have:
-                    db.execute(f"ALTER TABLE accounts ADD COLUMN {col} {decl}")
+            for table, cols in ADDED_COLUMNS.items():
+                have = {r[1] for r in db.execute(f"PRAGMA table_info({table})")}
+                for col, decl in cols.items():
+                    if col not in have:
+                        db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+            for base in BASE_PRODUCTS:   # 새 상품이 코드에 추가되면 가격·재고 행도 따라 생긴다
+                db.execute("INSERT OR IGNORE INTO products (code, price, active) VALUES (?, ?, 1)", (base["code"], base["price"]))
+                for size, qty in zip(STOCK_SIZES, STOCK_SEED.get(base["code"], [0] * len(STOCK_SIZES))):
+                    db.execute("INSERT OR IGNORE INTO stock (code, size, qty) VALUES (?, ?, ?)", (base["code"], size, qty))
             db.commit()
         finally:
             db.close()
+        self.load_catalog()
         if demo and not self._has_demo():
             self.seed()
 
@@ -159,6 +170,41 @@ class Store:
             rows = db.execute(f"SELECT {', '.join(ORDER_COLS)} FROM orders WHERE account_id = ? ORDER BY ordered_at DESC, id DESC", (user_id,)).fetchall()
         return {"id": a["id"], "name": a["name"], "role": a["role"], "orders": [dict(r) for r in rows]}
 
+    def get_contact(self, user_id: str) -> Optional[str]:
+        with self._tx() as db:
+            row = db.execute("SELECT contact FROM accounts WHERE id = ?", (user_id,)).fetchone()
+        return row["contact"] if row else None
+
+    def set_contact(self, user_id: str, contact: str) -> None:
+        with self._tx() as db:
+            db.execute("UPDATE accounts SET contact = ? WHERE id = ?", (contact, user_id))
+
+    def change_password(self, user_id: str, current: str, new: str) -> None:
+        with self._tx() as db:
+            row = db.execute("SELECT password_hash FROM accounts WHERE id = ?", (user_id,)).fetchone()
+            if not row or row["password_hash"] is None:
+                raise StoreError("no_password", "이 계정은 비밀번호를 쓰지 않아요.")
+            if not check_password(current, row["password_hash"]):
+                raise StoreError("bad_credentials", "지금 비밀번호가 맞지 않아요.")
+            db.execute("UPDATE accounts SET password_hash = ? WHERE id = ?", (hash_password(new), user_id))
+
+    def reset_password(self, user_id: str) -> str:
+        """사장님이 고객에게 전해 줄 임시 비밀번호를 만든다. 고객 계정(비밀번호를 쓰는 계정)만 된다."""
+        with self._tx() as db:
+            row = db.execute("SELECT role, password_hash FROM accounts WHERE id = ?", (user_id,)).fetchone()
+            if not row or row["role"] != "customer" or row["password_hash"] is None:
+                raise StoreError("unknown_customer", "비밀번호를 다시 만들 수 있는 고객이 아니에요.")
+            temp = secrets.token_urlsafe(9)
+            db.execute("UPDATE accounts SET password_hash = ? WHERE id = ?", (hash_password(temp), user_id))
+            return temp
+
+    def list_customers(self) -> list[dict]:
+        with self._tx() as db:
+            rows = db.execute("SELECT a.id, a.name, a.contact, a.created_at, a.password_hash IS NOT NULL AS has_password, "
+                              "(SELECT COUNT(*) FROM orders o WHERE o.account_id = a.id) AS orders "
+                              "FROM accounts a WHERE a.role = 'customer' ORDER BY a.created_at DESC, a.id").fetchall()
+        return [{**dict(r), "has_password": bool(r["has_password"])} for r in rows]
+
     def create_account(self, user_id: str, name: str, password: str, role: str = "customer") -> None:
         with self._tx() as db:
             if db.execute("SELECT 1 FROM accounts WHERE id = ?", (user_id,)).fetchone():
@@ -207,6 +253,10 @@ class Store:
     def add_order(self, user_id: str, code: str, size: int) -> dict:
         """새 주문. 번호는 전체 주문에서 하나씩 올린다 (계정끼리 겹치지 않게)."""
         with self._tx() as db:
+            item = db.execute("SELECT active FROM products WHERE code = ?", (code,)).fetchone()
+            if not item or not item["active"]:
+                raise StoreError("not_for_sale", "지금은 판매하지 않는 상품이에요.")
+            self._take(db, code, size)
             last = db.execute("SELECT MAX(CAST(SUBSTR(id, 4) AS INTEGER)) FROM orders").fetchone()[0] or 0
             o = {"id": f"PR-{last + 1:04d}", "code": code, "size": size, "status": "결제완료", "exchanges": 0, "note": None,
                  "ordered_at": day_iso(0), "shipped_at": None, "delivered_at": None}
@@ -224,7 +274,18 @@ class Store:
         out.sort(key=lambda o: 0 if o["status"] in TRANSITIONS else 1)
         return out
 
-    def transition_order(self, order_id: str, to: str, note: Optional[str] = None) -> dict:
+    @staticmethod
+    def _take(db, code: str, size: int) -> None:
+        """재고 한 켤레를 뺀다. 같은 트랜잭션 안에서 확인과 차감을 같이 해서 마지막 한 켤레가 두 번 팔리지 않는다."""
+        cur = db.execute("UPDATE stock SET qty = qty - 1 WHERE code = ? AND size = ? AND qty > 0", (code, size))
+        if cur.rowcount == 0:
+            raise StoreError("out_of_stock", f"{size}mm는 품절이에요. 다른 사이즈를 골라 주세요.")
+
+    @staticmethod
+    def _put_back(db, code: str, size: int) -> None:
+        db.execute("INSERT INTO stock (code, size, qty) VALUES (?, ?, 1) ON CONFLICT(code, size) DO UPDATE SET qty = qty + 1", (code, size))
+
+    def transition_order(self, order_id: str, to: str, note: Optional[str] = None, new_size: Optional[int] = None) -> dict:
         """사장님이 주문을 다음 단계로 넘긴다. 규칙표에 없는 변경은 거절한다."""
         with self._tx() as db:
             row = db.execute(f"SELECT account_id, {', '.join(ORDER_COLS)} FROM orders WHERE id = ?", (order_id,)).fetchone()
@@ -236,14 +297,22 @@ class Store:
                 raise StoreError("bad_transition", f'"{o["status"]}" 상태에서는 "{to}"(으)로 바꿀 수 없어요.')
             was, today = o["status"], day_iso(0)
             o["status"], o["note"] = to, (note or "").strip() or step[2]
+            if was == "교환 접수":      # 교환 상품을 보낸다: 돌아온 사이즈는 재고로, 새 사이즈는 재고에서
+                if new_size is None:
+                    raise StoreError("size_required", "교환해 보낼 사이즈를 골라 주세요.")
+                self._put_back(db, o["code"], o["size"])
+                self._take(db, o["code"], new_size)
+                o["size"] = new_size
+            elif to == "반품 완료":
+                self._put_back(db, o["code"], o["size"])
             if to == "배송중":
                 o["shipped_at"] = today
             elif to == "배송완료" and was in ("배송중", "교환 접수"):
                 o["delivered_at"] = today   # 교환 상품이 도착한 날부터 교환 기간을 다시 센다
             elif to == "교환 접수":
                 o["exchanges"] += 1
-            db.execute("UPDATE orders SET status = ?, note = ?, exchanges = ?, shipped_at = ?, delivered_at = ? WHERE id = ?",
-                       (o["status"], o["note"], o["exchanges"], o["shipped_at"], o["delivered_at"], order_id))
+            db.execute("UPDATE orders SET status = ?, note = ?, exchanges = ?, shipped_at = ?, delivered_at = ?, size = ? WHERE id = ?",
+                       (o["status"], o["note"], o["exchanges"], o["shipped_at"], o["delivered_at"], o["size"], order_id))
             if was == "사장님 확인 중":   # 결재가 끝났으니 이 주문으로 넘어온 건도 닫는다
                 db.execute("UPDATE handoffs SET status = 'done', resolved_at = ?, resolution = ? WHERE order_id = ? AND status = 'open'",
                            (now_iso(), f"{step[1]}: {o['note']}", order_id))
@@ -259,9 +328,19 @@ class Store:
                              (now_iso(), kind, thread_id, account_id, order_id, summary, json.dumps(detail, ensure_ascii=False)))
             return cur.lastrowid
 
+    def set_handoff_contact(self, thread_id: str, contact: str) -> int:
+        """이 대화에서 넘어간 열린 건들에 연락처를 붙인다. 붙인 건수를 돌려준다."""
+        with self._tx() as db:
+            return db.execute("UPDATE handoffs SET contact = ? WHERE thread_id = ? AND status = 'open'", (contact, thread_id)).rowcount
+
+    def thread_contact(self, thread_id: str) -> Optional[str]:
+        with self._tx() as db:
+            row = db.execute("SELECT contact FROM handoffs WHERE thread_id = ? AND contact IS NOT NULL ORDER BY id DESC LIMIT 1", (thread_id,)).fetchone()
+        return row["contact"] if row else None
+
     def list_handoffs(self, status: str = "open") -> list[dict]:
         with self._tx() as db:
-            rows = db.execute("SELECT h.*, a.name AS account_name FROM handoffs h LEFT JOIN accounts a ON a.id = h.account_id "
+            rows = db.execute("SELECT h.*, a.name AS account_name, COALESCE(h.contact, a.contact) AS contact FROM handoffs h LEFT JOIN accounts a ON a.id = h.account_id "
                               "WHERE h.status = ? ORDER BY h.id DESC LIMIT 200", (status,)).fetchall()
         return [{**dict(r), "detail": json.loads(r["detail"])} for r in rows]
 
@@ -282,6 +361,43 @@ class Store:
                 "orders": sum(by_status.values()),
                 "customers": db.execute("SELECT COUNT(*) FROM accounts WHERE role = 'customer'").fetchone()[0],
             }
+
+    # ---------- 상품 · 재고 ----------
+    def load_catalog(self) -> None:
+        """DB의 가격·판매 여부를 규칙이 보는 상품 목록(data.PRODUCTS)에 반영한다. 시작할 때와 사장님이 바꿀 때 부른다."""
+        with self._tx() as db:
+            rows = db.execute("SELECT code, price, active FROM products").fetchall()
+        apply_catalog({r["code"]: {"price": r["price"], "active": bool(r["active"])} for r in rows})
+
+    def stock_map(self) -> dict[str, dict[int, int]]:
+        with self._tx() as db:
+            rows = db.execute("SELECT code, size, qty FROM stock ORDER BY code, size").fetchall()
+        out: dict[str, dict[int, int]] = {}
+        for r in rows:
+            out.setdefault(r["code"], {})[r["size"]] = r["qty"]
+        return out
+
+    def list_products(self) -> list[dict]:
+        stock = self.stock_map()
+        with self._tx() as db:
+            rows = {r["code"]: r for r in db.execute("SELECT code, price, active FROM products").fetchall()}
+        return [{"code": b["code"], "name": b["name"], "stud": b["stud"], "width": b["width"], "price": rows[b["code"]]["price"],
+                 "active": bool(rows[b["code"]]["active"]), "stock": [{"size": z, "qty": q} for z, q in sorted(stock.get(b["code"], {}).items())]}
+                for b in BASE_PRODUCTS]
+
+    def update_product(self, code: str, price: Optional[int] = None, active: Optional[bool] = None, stock: Optional[dict[int, int]] = None) -> None:
+        with self._tx() as db:
+            if not db.execute("SELECT 1 FROM products WHERE code = ?", (code,)).fetchone():
+                raise StoreError("unknown_product", "없는 상품이에요.")
+            if price is not None:
+                db.execute("UPDATE products SET price = ? WHERE code = ?", (price, code))
+            if active is not None:
+                db.execute("UPDATE products SET active = ? WHERE code = ?", (int(active), code))
+            for size, qty in (stock or {}).items():
+                cur = db.execute("UPDATE stock SET qty = ? WHERE code = ? AND size = ?", (qty, code, size))
+                if cur.rowcount == 0:
+                    raise StoreError("unknown_size", f"{size}mm는 이 상품에 없는 사이즈예요.")
+        self.load_catalog()
 
     # ---------- 대화(thread) 청소 ----------
     def touch_thread(self, thread_id: str) -> None:
@@ -309,7 +425,7 @@ class Store:
 
 
 def order_actions(status: str) -> list[dict]:
-    return [{"to": to, "label": label} for to, label, _ in TRANSITIONS.get(status, [])]
+    return [{"to": to, "label": label, "needs_size": status == "교환 접수"} for to, label, _ in TRANSITIONS.get(status, [])]
 
 
 def order_title(o: dict) -> str:
