@@ -8,6 +8,7 @@ const s = useSession()
   <header class="top">
     <div class="brand"><span class="wordmark">PITCHROOM</span><span class="tag">AI 축구화 상담 · 데모</span></div>
     <nav class="who" aria-label="계정">
+      <button v-if="!s.adminOpen && s.catalog" class="pill-btn" type="button" :aria-expanded="s.panel === 'catalog'" aria-controls="panel" @click="s.togglePanel('catalog')">전체 축구화 {{ s.catalog.products.length }}</button>
       <template v-if="s.account">
         <span class="me">{{ s.account.name }}님</span>
         <button v-if="s.isAdmin" class="pill-btn" :class="{ dark: !s.adminOpen }" type="button" @click="s.adminOpen = !s.adminOpen">{{ s.adminOpen ? '매장 화면' : '관리' }}</button>

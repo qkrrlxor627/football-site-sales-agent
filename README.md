@@ -41,11 +41,11 @@
 <tr>
 <td width="50%" valign="top">
 <img src="docs/screenshots/01-home.png" alt="첫 화면: 어떤 구장에서 뛰세요?">
-<p align="center"><b>① 질문 하나로 시작</b><br>답할수록 뒤에 있는 축구화 3켤레가 선명해집니다.</p>
+<p align="center"><b>① 질문 하나로 시작</b><br>답할수록 뒤에 있는 축구화 3켤레가 선명해지고, 구장을 말하면 배경이 그 구장으로 바뀝니다.</p>
 </td>
 <td width="50%" valign="top">
 <img src="docs/screenshots/02-recommend.png" alt="추천 결과 3켤레">
-<p align="center"><b>② 규칙이 고른 3켤레</b><br>딱 맞는 것이 부족하면 무엇을 양보했는지 함께 보여 줍니다.</p>
+<p align="center"><b>② 규칙이 고른 3켤레</b><br>29종 가운데 조건을 통과한 것만 남기고, 할인 중이면 정가와 할인율을 함께 보여 줍니다.</p>
 </td>
 </tr>
 <tr>
@@ -56,6 +56,15 @@
 <td width="50%" valign="top">
 <img src="docs/screenshots/05-cs-cardnews.png" alt="반품 요청 처리 과정을 보여주는 카드 4장">
 <p align="center"><b>④ 교환·반품 처리 과정</b><br>문의, 에이전트 논의, 적용 규칙, 결론을 카드 4장으로 보여 줍니다.</p>
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td valign="top">
+<img src="docs/screenshots/09-catalog.png" alt="전체 축구화를 구장·라인·할인으로 걸러 보는 화면">
+<p align="center"><b>전체 축구화 둘러보기</b><br>구장, 라인, 할인 여부로 걸러 보고 바로 구매할 수 있습니다.</p>
 </td>
 </tr>
 </table>
@@ -184,6 +193,9 @@ stateDiagram-v2
 
 | 기능 | 동작 |
 |---|---|
+| 상품 | 나이키 축구화 29종(Mercurial·Phantom·Tiempo, 스터드 FG·AG·MG·TF·IC). 색상, 정가·할인가를 함께 보여 줍니다. 출처와 확인일은 `docs/product-sources.csv` |
+| 둘러보기 | 머리말의 *전체 축구화*에서 구장·라인·할인으로 걸러 보고 바로 구매합니다. 어느 신발이 내 조건에 안전한지는 상담(규칙)이 판단합니다 |
+| 구장 배경 | 구장을 말하면 무대 배경이 그 구장 사진으로 바뀝니다 (천연잔디, 인조잔디, 풋살장. 흙운동장·실내는 기본 배경) |
 | 넘어온 건 | 발 건강 언급, 규칙 밖 교환·반품, 맞는 상품 없음이 관리 화면 목록에 쌓입니다. 고객 문장, 적용 규칙, 에이전트 논의(내부 포함)를 함께 봅니다 |
 | 연락처 | 사람에게 넘어간 건이면 고객 화면이 전화번호나 이메일을 묻습니다. 로그인한 고객은 한 번 남기면 다시 묻지 않습니다 |
 | 알림 | `.env`의 `PITCHROOM_NOTIFY_WEBHOOK`에 Slack·Discord 웹훅 주소를 넣으면 넘어온 건과 새 주문을 알려 줍니다. 고객이 쓴 문장은 보내지 않고 종류와 주문 번호만 보냅니다 |
@@ -236,7 +248,7 @@ stateDiagram-v2
 ```
 pitchroom/
   config.py      .env 읽기 (API 키, 모델명, 서버 주소, DB 경로, 운영 설정)
-  data.py        상품 정의, 구장→스터드 규칙표, 안전한 대체표, 정책, 데모 계정, 재고 시드
+  data.py        상품 정의(29종), 구장→스터드 규칙표, 안전한 대체표, 정책, 데모 계정, 재고 시드
   extract.py     LLM 구조화 추출(Pydantic) + 키워드 대체 + ground_check(LLM이 지어낸 값 제거)
   tools.py       단일 책임 도구: 상품 필터, 대안 계산, 정책 판단, 주문 조회, 선수 검색(Tavily)
   graph.py       State, 노드 7개, 조건 분기, to_client(내부 논의 제거)
@@ -248,7 +260,7 @@ pitchroom/
   ui.py          예전 Gradio 화면
   evaluation.py  시나리오 17개, MVP vs 개선 비교표
   cli.py, demo.py
-  static/images  상품 사진
+  static/images  상품 사진, bg/ 구장 배경 사진
 frontend/        Vue 3 + TypeScript + Pinia (Vite). 판단 로직 없음: API가 준 화면 JSON만 그린다
   src/stores/session.ts   화면 상태와 API 호출
   src/stores/admin.ts     관리 화면 상태
@@ -257,6 +269,7 @@ app.py           웹 서버 실행 (uvicorn)
 web/index.html   처음 만든 HTML 데모 (참고용. 판단 로직이 JS로 따로 들어 있어 서버와 다를 수 있음)
 tests/           pytest (그래프 규칙 + HTTP API)
 docs/screenshots 이 문서의 시연 화면
+docs/product-sources.csv   추가한 상품·배경의 출처, 품번, 확인일, 라이선스
 Dockerfile, docker-compose.yml   화면 빌드 + 서버를 한 이미지로 (requirements.txt만 설치)
 requirements-dev.txt             개발·평가·테스트용 추가 의존성
 ```
@@ -291,6 +304,7 @@ requirements-dev.txt             개발·평가·테스트용 추가 의존성
 ## 알려진 한계
 
 - **결제가 없습니다.** 주문은 버튼 한 번으로 생깁니다. PG사 계정과 키가 있어야 붙일 수 있습니다.
+- **상품 값 일부는 가정입니다.** S-11~S-30의 원화 가격은 달러 가격에 1,400원을 곱해 맞췄고, 발볼은 라인 기준(Mercurial 좁음, Phantom 보통, Tiempo 넓음)으로 넣었습니다. MG(멀티그라운드) 스터드는 천연·인조잔디에 허용했습니다.
 - **추천은 재고를 보지 않습니다.** 규칙은 구장·발볼·예산으로만 고르고, 원하는 사이즈가 품절이면 카드에 표시만 합니다.
 - **상품 추가는 코드에서 합니다.** 관리 화면은 가격·판매 여부·재고만 바꿉니다 (새 상품은 `data.py`와 사진이 필요).
 - 고객이 대화 중에 말한 교환 희망 사이즈는 주문에 기록되지 않습니다. 교환 완료 때 사장님이 고릅니다.
@@ -298,7 +312,7 @@ requirements-dev.txt             개발·평가·테스트용 추가 의존성
 - 알림은 웹훅 하나입니다. 보내지 못하면 로그만 남기고 다시 시도하지 않습니다.
 - 서버는 한 프로세스(워커 1개) 기준입니다. 요청 제한, 대화 잠금, 상품 목록이 프로세스 메모리에 있습니다.
 - 발 건강 키워드는 부분 일치라 "아파트" 같은 단어도 전문가 연결로 갑니다 (`data.py`의 `RED_FLAGS`).
-- 상품명·사진은 시연용입니다. 공개 전에 직접 촬영하거나 허가받은 이미지로 바꿔야 합니다.
+- 상품명·사진은 시연용입니다. 공개 전에 직접 촬영하거나 허가받은 이미지로 바꿔야 합니다. 구장 배경 사진은 Unsplash License입니다.
 
 ## 다음 단계
 

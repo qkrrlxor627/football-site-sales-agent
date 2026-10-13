@@ -36,7 +36,7 @@ def test_lying_llm_cannot_auto_approve_exchange(monkeypatch):
 
 def test_internal_discussion_never_reaches_client():
     cfg = new_thread()
-    c = chat("천연잔디, 발볼 넓고 20만원 이하", cfg, quiet=True)
+    c = chat("천연잔디, 발볼 넓고 5만원 이하", cfg, quiet=True)
     assert c["hidden"] >= 1
     assert all("내부" not in m["text"] for m in c["discussion"])
 

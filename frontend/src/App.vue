@@ -3,6 +3,7 @@ import { computed, onMounted, watch } from 'vue'
 
 import AdminView from './components/AdminView.vue'
 import AppHeader from './components/AppHeader.vue'
+import CatalogPanel from './components/CatalogPanel.vue'
 import ErrorToast from './components/ErrorToast.vue'
 import LoginPanel from './components/LoginPanel.vue'
 import OrdersPanel from './components/OrdersPanel.vue'
@@ -16,6 +17,7 @@ watch(() => s.isAdmin, (on) => !on && useAdmin().clear()) // 로그아웃하면 
 
 const showLogin = computed(() => s.panel === 'login' && !s.account)
 const showOrders = computed(() => s.panel === 'orders' && !!s.account)
+const showCatalog = computed(() => s.panel === 'catalog' && !s.adminOpen)
 const source = computed(() => s.view?.source ?? s.modeText)
 </script>
 
@@ -23,8 +25,9 @@ const source = computed(() => s.view?.source ?? s.modeText)
   <div class="wrap">
     <AppHeader />
 
-    <section v-if="showLogin || showOrders" id="panel" class="panel" :aria-label="showLogin ? '로그인' : '내 주문'" @keydown.esc="s.panel = null">
+    <section v-if="showLogin || showOrders || showCatalog" id="panel" class="panel" :aria-label="showLogin ? '로그인' : showCatalog ? '전체 축구화' : '내 주문'" @keydown.esc="s.panel = null">
       <LoginPanel v-if="showLogin" />
+      <CatalogPanel v-else-if="showCatalog" />
       <OrdersPanel v-else-if="s.account" :account="s.account" />
     </section>
 

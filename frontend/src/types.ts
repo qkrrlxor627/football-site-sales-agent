@@ -8,13 +8,10 @@ export interface Product {
   stud_info: string
   width: string
   price: number
+  list_price: number | null // 정가. 지금 가격이 더 쌀 때만 온다 (할인 중)
+  color: string | null
   feel: string
   image: string | null
-}
-
-/** 카탈로그의 상품: 재고가 있는 사이즈를 함께 준다 */
-export interface CatalogProduct extends Product {
-  sizes: number[]
 }
 
 export interface ProductCard extends Product {
@@ -26,6 +23,11 @@ export interface ProductCard extends Product {
   buyable: boolean
   sizes: number[] // 재고가 있는 사이즈
   size_note: string | null // 원하는 사이즈가 없을 때 (예: 270mm 품절)
+}
+
+/** 둘러보기 화면의 상품: 추천 카드와 같은 모양 + 어느 구장에 맞는지 */
+export interface CatalogProduct extends ProductCard {
+  surfaces: string[]
 }
 
 export interface Step {
@@ -108,6 +110,7 @@ export interface View {
   placeholder: string
   default_size: number
   contact: { saved: string | null } | null // 사람이 이어받는 건이면 연락받을 곳을 묻는다
+  background: string | null // 구장에 맞는 배경 사진
 }
 
 export interface Account {
@@ -125,6 +128,8 @@ export interface Envelope {
 
 export interface Catalog {
   products: CatalogProduct[]
+  surfaces: string[]
+  lines: string[]
   demo_accounts: { id: string; name: string; desc: string }[]
   policy: Record<string, string | number>
   shop_home: View

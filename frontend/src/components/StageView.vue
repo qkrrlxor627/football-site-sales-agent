@@ -36,7 +36,10 @@ async function send(text: string) {
 </script>
 
 <template>
-  <section class="stage" :class="{ collect: view.collect }" :aria-busy="s.busy">
+  <section class="stage" :class="{ collect: view.collect, photo: !!view.background }" :aria-busy="s.busy">
+    <Transition name="bg">
+      <div v-if="view.background" :key="view.background" class="bg" :style="{ backgroundImage: `url(${view.background})` }" aria-hidden="true"></div>
+    </Transition>
     <svg class="pitch" viewBox="0 0 1000 420" preserveAspectRatio="none" aria-hidden="true">
       <rect x="6" y="6" width="988" height="408" rx="26" /><line x1="500" y1="6" x2="500" y2="414" />
       <circle cx="500" cy="210" r="78" /><rect x="6" y="110" width="120" height="200" /><rect x="874" y="110" width="120" height="200" />
@@ -78,6 +81,12 @@ async function send(text: string) {
 .stage { position: relative; border-radius: 28px; overflow: hidden; isolation: isolate; background: var(--bg); }
 .pitch { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
 .pitch * { stroke: var(--pitch); fill: none; stroke-width: 1.5; }
+/* 구장 사진 배경: 글자가 읽히도록 위에 반투명 막을 덮고, 구장이 바뀌면 부드럽게 넘어간다 */
+.bg { position: absolute; inset: 0; z-index: -2; background-size: cover; background-position: center; }
+.bg::after { content: ""; position: absolute; inset: 0; background: var(--photo-veil); }
+.bg-enter-active, .bg-leave-active { transition: opacity .8s ease; }
+.bg-enter-from, .bg-leave-to { opacity: 0; }
+.stage.photo .pitch { opacity: .55; }
 
 .shelf-wrap { padding: 28px 20px 24px; }
 .count { font-family: var(--font-display); font-weight: 700; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; margin-bottom: 14px; }
@@ -95,6 +104,7 @@ async function send(text: string) {
   position: absolute; inset: 0; justify-content: safe center; overflow-y: auto;
   background: radial-gradient(ellipse at center, var(--veil) 35%, transparent 80%);
 }
+.stage.photo.collect .ask { background: radial-gradient(ellipse at center, var(--veil) 30%, transparent 75%); }
 .echo { margin: 0; font-size: 13px; color: var(--muted); max-width: 600px; overflow-wrap: anywhere; }
 .q { margin: 0; font-family: var(--font-display); font-weight: 700; letter-spacing: -.02em; line-height: 1.3; text-wrap: balance; max-width: 760px; font-size: clamp(22px, 3.4vw, 34px); }
 .q.long { font-size: clamp(19px, 2.4vw, 24px); font-weight: 600; }

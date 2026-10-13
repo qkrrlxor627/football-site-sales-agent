@@ -18,6 +18,7 @@ STUD_INFO = {
     "TF": "인조·풋살용 고무 돌기",
     "IC": "실내 체육관용 평평한 창",
     "HG": "단단한 흙·맨땅용 짧고 단단한 스터드",
+    "MG": "천연·인조잔디 겸용 스터드",
 }
 DEFAULT_SIZE = 270
 HOME_CODES = ["S-04", "S-08", "S-02"]
@@ -34,10 +35,21 @@ def image_url(code: str) -> Optional[str]:
     return f"/images/{code}.webp" if (IMAGE_DIR / f"{code}.webp").exists() else None
 
 
+# 구장별 무대 배경 사진. 사진이 없는 구장(흙운동장, 실내)은 기본 배경을 쓴다.
+BACKGROUND = {"천연잔디": "natural", "인조잔디": "artificial", "풋살장": "futsal"}
+
+
+def background_url(surface: Optional[str] = None) -> Optional[str]:
+    name = BACKGROUND.get(surface or "", "default")
+    return f"/images/bg/{name}.webp" if (IMAGE_DIR / "bg" / f"{name}.webp").exists() else None
+
+
 def product_info(code: str) -> dict:
     p = BY_CODE[code]
+    lp = p.get("list_price")
     return {"code": code, "name": p["name"], "line": p["line"], "stud": p["stud"], "stud_info": STUD_INFO[p["stud"]],
-            "width": p["width"], "price": p["price"], "feel": p["feel"], "image": image_url(code)}
+            "width": p["width"], "price": p["price"], "list_price": lp if lp and lp > p["price"] else None,   # 정가보다 싸게 팔 때만 할인으로 보여준다
+            "color": p.get("color"), "feel": p["feel"], "image": image_url(code)}
 
 
 def product_card(code, profile, label=None, quiet=False, trade=None, buyable=False) -> dict:
@@ -97,6 +109,7 @@ def _view(**kw) -> dict:
         "discussion": [], "hidden": 0,
         "route": None, "reason": None, "source": None,
         "placeholder": "여기에 답해 주세요", "default_size": DEFAULT_SIZE,
+        "background": background_url(),
     }
     return {**base, **kw}
 
@@ -135,7 +148,7 @@ def result_view(s: dict) -> dict:
     p, route, reason = s.get("profile") or {}, c["route"], c["reason"]
     acc = s.get("account")
     common = {"screen": "result", "headline": c["reply"], "echo": s.get("user_text"), "route": route, "reason": reason,
-              "source": c["source"], "default_size": p.get("size") or DEFAULT_SIZE}
+              "source": c["source"], "default_size": p.get("size") or DEFAULT_SIZE, "background": background_url(p.get("surface"))}
 
     if c["cs_card"]:   # 축구화 자리에 CS 카드뉴스가 뜬다. 논의는 카드 안에 있으므로 아래에 또 그리지 않는다
         k = c["cs_card"]
@@ -204,11 +217,19 @@ def view_for(s: dict) -> dict:
     return shop_home()
 
 
+def catalog_card(p: dict, stock: dict) -> dict:
+    """둘러보기 화면의 상품 한 장: 추천 카드와 같은 모양에 '어느 구장에 맞는지'를 더한다."""
+    sizes = [z for z, q in sorted(stock.get(p["code"], {}).items()) if q > 0]
+    return {**product_card(p["code"], {}, buyable=True), "sizes": sizes, "size_note": None if sizes else "전 사이즈 품절",
+            "surfaces": [surf for surf, studs in SURFACE_TO_STUD.items() if p["stud"] in studs]}
+
+
 def catalog(demo: bool = True, stock: Optional[dict] = None) -> dict:
     """화면이 처음 받아 두는 데이터. 데모 모드가 아니면 데모 계정 목록은 비운다. sizes는 재고가 있는 사이즈만."""
     stock = stock or {}
     return {
-        "products": [{**product_info(p["code"]), "sizes": [z for z, q in sorted(stock.get(p["code"], {}).items()) if q > 0]} for p in PRODUCTS],
+        "products": [catalog_card(p, stock) for p in PRODUCTS],
+        "surfaces": list(SURFACE_TO_STUD), "lines": LINES,
         "demo_accounts": [{"id": k, "name": v["name"], "desc": ACCOUNT_DESC.get(k, "")} for k, v in DEMO_ACCOUNTS.items()] if demo else [],
         "policy": POLICY,
         "shop_home": shop_home(),

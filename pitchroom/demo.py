@@ -11,7 +11,7 @@ def main():
 
     print("\n=== 조건을 전부 맞추는 신발이 없을 때: 대안 제시 ===")
     cfg = new_thread()
-    chat("천연잔디, 발볼 넓고 20만원 이하", cfg)
+    chat("천연잔디, 발볼 넓고 5만원 이하", cfg)
 
     print("\n=== 발 건강 언급: 사람에게 ===")
     cfg = new_thread()

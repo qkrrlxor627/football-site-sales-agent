@@ -46,7 +46,7 @@ def test_scenario_route_over_http(client, sc):
 
 def test_home_and_catalog(client):
     cat = client.get("/api/catalog").json()
-    assert len(cat["products"]) == 10 and all(p["image"] for p in cat["products"])
+    assert len(cat["products"]) == 29 and all(p["image"] for p in cat["products"])
     assert [a["id"] for a in cat["demo_accounts"]] == ["minsu", "jiwoo", "hyun", "seoyeon"]
     body = client.get("/api/session").json()
     assert body["account"] is None and body["view"]["screen"] == "shop" and body["view"]["collect"]
@@ -369,14 +369,14 @@ def test_owner_changes_price_stock_and_visibility(db):
     app = app_with(db)
     with TestClient(app) as shopper, TestClient(app) as owner:
         login_admin(owner)
-        board = owner.post("/api/admin/products/S-07", json={"price": 99000, "stock": {"250": 0, "270": 7}}).json()
+        board = owner.post("/api/admin/products/S-07", json={"price": 59000, "stock": {"250": 0, "270": 7}}).json()
         item = next(p for p in board["products"] if p["code"] == "S-07")
-        assert item["price"] == 99000 and stock_of(board, "S-07")[250] == 0 and stock_of(board, "S-07")[270] == 7
+        assert item["price"] == 59000 and stock_of(board, "S-07")[250] == 0 and stock_of(board, "S-07")[270] == 7
         for t in ["풋살장", "발볼 넓어요"]:
             say(shopper, t)
         view = say(shopper, "15만원")["view"]
         card = view["shelf"]["cards"][0]
-        assert (card["code"], card["price"]) == ("S-07", 99000) and 250 not in card["sizes"]   # 바꾼 값이 바로 추천에 쓰인다
+        assert (card["code"], card["price"]) == ("S-07", 59000) and 250 not in card["sizes"]   # 바꾼 값이 바로 추천에 쓰인다
 
         owner.post("/api/admin/products/S-07", json={"active": False})
         shopper.post("/api/reset")
@@ -391,7 +391,7 @@ def test_owner_changes_price_stock_and_visibility(db):
     with TestClient(app_with(db)) as again:   # 다시 띄워도 유지
         login_admin(again)
         item = next(p for p in again.get("/api/admin/board").json()["products"] if p["code"] == "S-07")
-        assert (item["price"], item["active"]) == (99000, False)
+        assert (item["price"], item["active"]) == (59000, False)
 
 
 @pytest.mark.parametrize("payload, status", [
@@ -602,3 +602,46 @@ def test_turning_demo_on_later_does_not_collide_with_real_orders(db):
         assert ids and "PR-0001" not in ids
         taeho = c.post("/api/login", json={"user_id": "taeho", "password": "correct-horse"}).json()["account"]
         assert [o["id"] for o in taeho["orders"]] == ["PR-0001"]
+
+
+# ---------- 넓어진 상품 목록: 할인, 색상, 구장 배경, 멀티그라운드 ----------
+def test_catalog_has_sale_colour_and_surfaces(client):
+    cat = client.get("/api/catalog").json()
+    by = {p["code"]: p for p in cat["products"]}
+    assert (by["S-14"]["price"], by["S-14"]["list_price"], by["S-14"]["color"]) == (146000, 224000, "블루/핑크")
+    assert by["S-11"]["list_price"] is None and by["S-01"]["color"] == "레드"
+    assert by["S-19"]["stud"] == "MG" and by["S-19"]["surfaces"] == ["천연잔디", "인조잔디"]
+    assert by["S-30"]["surfaces"] == ["풋살장", "실내"] and by["S-11"]["surfaces"] == ["인조잔디", "흙운동장", "풋살장"]
+    assert "S-15" not in by and cat["surfaces"] == ["천연잔디", "인조잔디", "흙운동장", "풋살장", "실내"] and cat["lines"] == ["Mercurial", "Phantom", "Tiempo"]
+    assert all(client.get(p["image"]).status_code == 200 for p in cat["products"])
+
+
+def test_sale_badge_disappears_when_owner_prices_above_list(db):
+    with TestClient(app_with(db)) as owner:
+        login_admin(owner)
+        owner.post("/api/admin/products/S-14", json={"price": 230000})
+        item = next(p for p in owner.get("/api/catalog").json()["products"] if p["code"] == "S-14")
+        assert (item["price"], item["list_price"]) == (230000, None)
+
+
+def test_stage_background_follows_the_surface(client):
+    assert client.get("/api/session").json()["view"]["background"] == "/images/bg/default.webp"
+    assert say(client, "인조잔디에서 뛰어요")["view"]["background"] == "/images/bg/artificial.webp"
+    assert client.get("/images/bg/artificial.webp").headers["content-type"] == "image/webp"
+    client.post("/api/reset")
+    assert say(client, "흙운동장이요")["view"]["background"] == "/images/bg/default.webp"   # 사진이 없는 구장은 기본 배경
+    client.post("/api/reset")
+    assert say(client, "풋살장")["view"]["background"] == "/images/bg/futsal.webp"
+
+
+def test_multi_ground_boots_are_offered_on_grass_but_never_on_dirt_or_indoor(client):
+    from pitchroom.data import BY_CODE
+    for t in ["천연잔디", "발볼 넓어요"]:
+        say(client, t)
+    cards = say(client, "10만원")["view"]["shelf"]["cards"]
+    assert cards[0]["code"] == "S-27" and cards[0]["stud"] == "MG"       # 천연잔디·넓음·10만원에 딱 맞는 겸용 스터드
+    for surface in ["흙운동장", "실내 체육관"]:
+        client.post("/api/reset")
+        for t in [surface, "보통", "상관없어요"]:
+            view = say(client, t)["view"]
+        assert all(BY_CODE[c["code"]]["stud"] != "MG" for c in view["shelf"]["cards"])

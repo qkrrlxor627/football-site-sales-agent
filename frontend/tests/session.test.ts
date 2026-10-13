@@ -11,14 +11,14 @@ const view = (over: Partial<View> = {}): View => ({
   count: { prefix: '전체 10종', strong: '', suffix: '' },
   shelf: { kind: 'products', blur: 12, paused: false, cards: [], empty_text: null },
   news: null, slots: [], handoff: null, hint: null, discussion: [], hidden: 0,
-  route: null, reason: null, source: null, placeholder: '', default_size: 270, contact: null, ...over,
+  route: null, reason: null, source: null, placeholder: '', default_size: 270, contact: null, background: null, ...over,
 })
 const card: Card = {
   code: 'S-08', name: 'Tiempo Maestro Pro', line: 'Tiempo', stud: 'AG', stud_info: '인조잔디용 짧고 많은 스터드', width: '넓음',
-  price: 219000, feel: '가죽 어퍼', image: null, label: '먼저 신어볼 1켤레', quiet: false, best: true, trade: null, why: '인조잔디 → AG', buyable: true, sizes: [265, 270], size_note: null,
+  price: 219000, list_price: null, color: '핑크', feel: '가죽 어퍼', image: null, label: '먼저 신어볼 1켤레', quiet: false, best: true, trade: null, why: '인조잔디 → AG', buyable: true, sizes: [265, 270], size_note: null,
 }
 const catalog: Catalog = {
-  products: [card], demo_accounts: [{ id: 'jiwoo', name: '지우', desc: '배송 완료 3일째' }], policy: {}, shop_home: view(),
+  products: [{ ...card, surfaces: ['인조잔디'] }], surfaces: ['인조잔디'], lines: ['Tiempo'], demo_accounts: [{ id: 'jiwoo', name: '지우', desc: '배송 완료 3일째' }], policy: {}, shop_home: view(),
 }
 const jiwoo: Account = { id: 'jiwoo', name: '지우', role: 'customer', orders: [] }
 const health = { ok: true, llm: false, model: null, search: false }
@@ -164,6 +164,12 @@ describe('ProductCard', () => {
     expect(w.find('.no-photo').text()).toBe('AG')
     await w.find('button.buy').trigger('click')
     expect(w.emitted('buy')).toEqual([['S-08']])
+  })
+
+  it('shows the discount against the list price', () => {
+    const w = mount(ProductCard, { props: { card: { ...card, price: 146000, list_price: 224000 } } })
+    expect(w.find('.off').text()).toBe('35%')
+    expect(w.find('s').text()).toContain('224,000원')
   })
 
   it('marks a sold-out shoe and blocks buying it', () => {

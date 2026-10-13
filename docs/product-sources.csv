@@ -1,0 +1,27 @@
+파일 ID,나이키 상품명 그대로,스터드,현재가(USD),정가(USD),품번,확인일,상품 페이지 URL,요청 대비 대체 내역,라이선스 정책 URL
+S11,Nike Mercurial Vapor 17 Academy,TF(HG 대체),$95,-,IO5002-001,2026-10-13,https://www.nike.com/t/mercurial-vapor-17-academy-turf-low-top-soccer-shoes-nuLIV4gP/IO5002-001,미국 나이키 검색 범위에서 HG 없음→TF 대체,
+S12,Nike Mercurial Superfly 11 Academy,TF(HG 대체),$100,-,IO1494-001,2026-10-13,https://www.nike.com/t/mercurial-superfly-11-academy-turf-high-top-soccer-shoes-vT98pOK9/IO1494-001,미국 나이키 검색 범위에서 HG 없음→TF 대체,
+S13,Nike Phantom 6 Low Academy,TF(HG 대체),$95,-,HQ2325-100,2026-10-13,https://www.nike.com/t/phantom-6-low-academy-turf-soccer-shoes-v9HSpHHd/HQ2325-100,미국 나이키 검색 범위에서 HG 없음→TF 대체,
+S14,Nike Phantom 6 Low Pro,TF(HG 대체),$103.97,$160,HJ4123-446,2026-10-13,https://www.nike.com/t/phantom-6-low-pro-turf-soccer-shoes-I7PQOlH6/HJ4123-446,미국 나이키 검색 범위에서 HG 없음→TF 대체,
+S15,Nike Tiempo Maestro Academy,TF(HG 대체),$90,-,IB4484-001,2026-10-13,https://www.nike.com/t/tiempo-maestro-academy-turf-low-top-soccer-shoes-EQe0YHIU/IB4484-001,미국 나이키 검색 범위에서 HG 없음→TF 대체,
+S16,Nike Tiempo Ligera Pro,TF(HG 대체),$140,-,IB4477-100,2026-10-13,https://www.nike.com/t/tiempo-ligera-pro-turf-low-top-soccer-shoes-yDEKj2lR/IB4477-100,미국 나이키 검색 범위에서 HG·Tiempo Elite TF 없음→Ligera Pro TF 대체,
+S17,Nike Mercurial Vapor 17 Academy,TF,$66.97,$95,IO5002-600,2026-10-13,https://www.nike.com/t/mercurial-vapor-17-academy-turf-low-top-soccer-shoes-nuLIV4gP/IO5002-600,-,
+S18,Nike Mercurial Superfly 11 Academy,TF,$70.97,$100,IO1494-100,2026-10-13,https://www.nike.com/t/mercurial-superfly-11-academy-turf-high-top-soccer-shoes-vT98pOK9/IO1494-100,CR7 에디션 확인 불가(미국 나이키 검색 범위)→일반 컬러 사용,
+S19,Nike Phantom 6 Low Club,FG/MG,$44.97,$70,HM8933-003,2026-10-13,https://www.nike.com/t/phantom-6-low-club-multi-ground-soccer-cleats-G4sHRhQr/HM8933-003,FG/MG 대체 — 사용자 승인,
+S20,Nike Tiempo Maestro Club,TF,$65,-,IB4482-001,2026-10-13,https://www.nike.com/t/tiempo-maestro-club-turf-low-top-soccer-shoes-kMDFqFVQ/IB4482-001,-,
+S21,Nike Mercurial Superfly 11 Elite,AG-PRO,$295,-,IM2513-001,2026-10-13,https://www.nike.com/t/mercurial-superfly-11-elite-artificial-grass-low-top-soccer-cleats-JcPHoPXr/IM2513-001,-,
+S22,Nike Phantom 6 Low Academy,AG,$66.97,$95,HQ2322-600,2026-10-13,https://www.nike.com/t/phantom-6-low-academy-artificial-grass-soccer-cleats-v9HSpHHd/HQ2322-600,-,
+S23,Nike Phantom 6 Low Elite,AG-PRO,$260,-,HQ2335-600,2026-10-13,https://www.nike.com/t/phantom-6-low-elite-artificial-grass-soccer-cleats-XmHqLlVc/HQ2335-600,-,
+S24,Nike Tiempo Maestro Academy,AG,$63.97,$90,IB4479-100,2026-10-13,https://www.nike.com/t/tiempo-maestro-academy-artificial-grass-low-top-soccer-cleats-EQe0YHIU/IB4479-100,-,
+S25,Nike Mercurial Superfly 11 Elite,FG,$295,-,IF8507-100,2026-10-13,https://www.nike.com/t/mercurial-superfly-11-elite-firm-ground-low-top-soccer-cleats-JcPHoPXr/IF8507-100,CR7 에디션 확인 불가(미국 나이키 검색 범위)→일반 컬러 사용,
+S26,Nike Phantom 6 Low Club,FG/MG,$70,-,HM8933-001,2026-10-13,https://www.nike.com/t/phantom-6-low-club-multi-ground-soccer-cleats-G4sHRhQr/HM8933-001,-,
+S27,Nike Tiempo Maestro Club,FG/MG,$45.97,$65,IB1602-100,2026-10-13,https://www.nike.com/t/tiempo-maestro-club-multi-ground-low-top-soccer-cleats-kMDFqFVQ/IB1602-100,-,
+S28,Nike Phantom 6 Low Academy,IC,$66.97,$95,HQ2319-600,2026-10-13,https://www.nike.com/t/phantom-6-low-academy-indoor-court-soccer-shoes-v9HSpHHd/HQ2319-600,-,
+S29,Nike Tiempo Reactgato,IC,$91.97,$130,HQ3159-100,2026-10-13,https://www.nike.com/t/tiempo-reactgato-indoor-court-low-top-soccer-shoes-UFPRBg8Y/HQ3159-100,미국 나이키 검색 범위에서 Tiempo Maestro Academy IC 없음→Reactgato IC 대체,
+S30,Nike Mercurial Vapor 17 Academy,IC,$95,-,IM5845-001,2026-10-13,https://www.nike.com/t/mercurial-vapor-17-academy-indoor-court-low-top-soccer-shoes-nuLIV4gP/IM5845-001,미국 나이키 검색 범위에서 Superfly 11 Academy IC 없음→Vapor 17 Academy IC 대체,
+BG0,기본 배경(위에서 본 텅 빈 경기장),-,-,-,-,2026-10-13,https://unsplash.com/photos/an-aerial-view-of-a-stadium-with-a-soccer-field-4SjLKtyTHzM,Unsplash License(무료·상업적 사용 가능),https://unsplash.com/license
+BG1,천연잔디 경기장,-,-,-,-,2026-10-13,https://unsplash.com/photos/green-and-white-soccer-field-m61qUssdYSs,Unsplash License(무료·상업적 사용 가능),https://unsplash.com/license
+BG2,인조잔디 구장,-,-,-,-,2026-10-13,https://unsplash.com/photos/soccer-field-under-stadium-lights-ARU18GpF6QQ,Unsplash License(무료·상업적 사용 가능),https://unsplash.com/license
+BG3,흙운동장(잔디·흙 혼합 구장; 원경에 소수 인원 - 사용자 승인),-,-,-,-,2026-10-13,https://www.pexels.com/photo/186239/,Pexels License(무료·상업적 사용 가능; 약관상 ZIP 파일 직접 전달 제한) / 파일 미포함: Pexels 약관상 독립 파일 배포 제한 - 상세 페이지에서 직접 다운로드 필요 (https://www.pexels.com/terms-of-service/),https://www.pexels.com/license/
+BG4,풋살장,-,-,-,-,2026-10-13,https://unsplash.com/photos/a-soccer-field-with-a-soccer-goal-on-it-lTydd5V_cUE,Unsplash License(무료·상업적 사용 가능),https://unsplash.com/license
+BG5,실내 체육관 마루 바닥,-,-,-,-,2026-10-13,https://www.pexels.com/photo/7186312/,Pexels License(무료·상업적 사용 가능; 약관상 ZIP 파일 직접 전달 제한) / 파일 미포함: Pexels 약관상 독립 파일 배포 제한 - 상세 페이지에서 직접 다운로드 필요 (https://www.pexels.com/terms-of-service/),https://www.pexels.com/license/

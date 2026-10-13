@@ -13,6 +13,7 @@
   --g-yellow: #e8a100;
   --g-green: #188038;
   --veil: rgba(251, 251, 253, .82);
+  --photo-veil: rgba(251, 251, 253, .86);
   --shadow: 0 1px 2px rgba(20, 24, 40, .06), 0 8px 28px rgba(20, 24, 40, .08);
   --font-display: "Manrope", "Noto Sans KR", system-ui, -apple-system, sans-serif;
   --font-body: "Noto Sans KR", "Apple SD Gothic Neo", system-ui, -apple-system, sans-serif;
@@ -22,7 +23,7 @@
   :root:not([data-theme="light"]) {
     --bg: #0e0f11; --surface: #17181b; --tile: #1d1f23; --fg: #f1f2f4; --muted: #9b9ea6;
     --line: #2a2d33; --pitch: #2b2f36; --accent: #8ab4f8; --g-blue: #8ab4f8; --g-red: #f28b82;
-    --g-yellow: #fdd663; --g-green: #81c995; --veil: rgba(14, 15, 17, .8);
+    --g-yellow: #fdd663; --g-green: #81c995; --veil: rgba(14, 15, 17, .8); --photo-veil: rgba(14, 15, 17, .82);
     --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 28px rgba(0, 0, 0, .35);
     --shoe-blend: normal; color-scheme: dark;
   }
@@ -30,7 +31,7 @@
 :root[data-theme="dark"] {
   --bg: #0e0f11; --surface: #17181b; --tile: #1d1f23; --fg: #f1f2f4; --muted: #9b9ea6;
   --line: #2a2d33; --pitch: #2b2f36; --accent: #8ab4f8; --g-blue: #8ab4f8; --g-red: #f28b82;
-  --g-yellow: #fdd663; --g-green: #81c995; --veil: rgba(14, 15, 17, .8);
+  --g-yellow: #fdd663; --g-green: #81c995; --veil: rgba(14, 15, 17, .8); --photo-veil: rgba(14, 15, 17, .82);
   --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 28px rgba(0, 0, 0, .35);
   --shoe-blend: normal; color-scheme: dark;
 }

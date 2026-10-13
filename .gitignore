@@ -21,3 +21,6 @@ frontend/dist/
 
 # 로컬 계정·비밀번호 메모
 profile.md
+
+# 원본 상품·배경 사진 (변환한 결과만 pitchroom/static/images에 둔다)
+nike_s11_s30_bg_partial/

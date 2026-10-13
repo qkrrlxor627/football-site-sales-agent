@@ -4,7 +4,7 @@ import { computed, ref } from 'vue'
 import { api, ApiError } from '../api'
 import type { Account, Catalog, Envelope, Health, ProductCard, View } from '../types'
 
-export type Panel = 'login' | 'orders' | null
+export type Panel = 'login' | 'orders' | 'catalog' | null
 
 // 화면 상태는 여기 한 곳에 둔다. 판단은 전부 서버가 하고, 여기서는 받은 화면을 들고 있다가 보여줄 뿐이다.
 export const useSession = defineStore('session', () => {
@@ -141,6 +141,7 @@ export const useSession = defineStore('session', () => {
       return
     }
     sheetCode.value = code
+    if (panel.value === 'catalog') panel.value = null // 둘러보다 고르면 구매 시트가 보이게 닫는다
   }
 
   async function buy(size: number) {
