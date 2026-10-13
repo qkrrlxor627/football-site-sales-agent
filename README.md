@@ -26,7 +26,7 @@
 
 ## 목차
 
-- [시연 화면](#시연-화면) (상담·주문, 접수 메모, 둘러보기, 사람에게 넘기기, 관리)
+- [시연 화면](#시연-화면) (상담·주문, 질문 답변, 접수 메모, 둘러보기, 사람에게 넘기기, 수요·대화, 관리)
 - [어떻게 판단하나](#어떻게-판단하나)
 - [빠른 시작](#빠른-시작)
 - [계정과 관리 화면](#계정과-관리-화면)
@@ -58,6 +58,30 @@
 <td width="50%" valign="top">
 <img src="docs/screenshots/05-cs-cardnews.png" alt="에이전트 논의 대화창과 내려받을 수 있는 접수 메모">
 <p align="center"><b>④ 교환·반품 처리 과정</b><br>에이전트 논의는 대화창으로, 결론은 PNG·JPG로 내려받는 접수 메모로 보여 줍니다.</p>
+</td>
+</tr>
+</table>
+
+### 질문에 답하기
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/screenshots/11-answer.png" alt="Superfly와 Vapor의 차이를 묻는 질문에 답한 화면">
+<p align="center"><b>설명 질문은 표를 조회해 답합니다</b><br>상담 중에 물어도 파악한 조건(구장 등)은 그대로 남아 상담이 이어집니다.</p>
+</td>
+<td width="50%" valign="top">
+
+| 질문 | 답하는 방식 |
+|---|---|
+| "Superfly랑 Vapor는 뭐가 달라요?"<br>"지금 할인하는 터프화 있어요?" | LLM이 상품표를 조회해 작성 → 금액·상품·스터드·할인 여부를 표와 대조 |
+| "교환 며칠까지 돼요?"<br>"반품 배송비는요?" | 정책표로 고정 답 (LLM이 있어도) |
+| "인조잔디에 FG 신어도 돼요?" | 스터드 규칙표로 고정 답 |
+| "Phantom이랑 Tiempo 차이는요?" | 라인 설명표로 고정 답 |
+| "이 신발 방수돼요?" | 표에 없음 → 모른다고 하고 사장님께 전달 |
+
+조회는 **최대 3바퀴**에서 끝납니다. 끝낼지는 LLM이 아니라 횟수와 시간이 정하고, 표와 어긋난 답은 고객에게 나가지 않습니다.
+
 </td>
 </tr>
 </table>
@@ -103,6 +127,21 @@
 <td width="50%" valign="top">
 <img src="docs/screenshots/06-admin-handoffs.png" alt="관리 화면의 넘어온 건 목록">
 <p align="center"><b>⑥ 사장님 화면에 쌓이는 넘어온 건</b><br>고객 문장, 연락처, 내부 논의까지 한곳에서 봅니다.</p>
+</td>
+</tr>
+</table>
+
+### 사장님: 놓친 수요와 대화 전체
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/screenshots/12-admin-demand.png" alt="관리 화면의 수요 탭: 맞는 상품이 없던 조건, 미취급 브랜드, 규칙 밖 요청, 답하지 못한 질문">
+<p align="center"><b>수요 탭</b><br>손님이 찾았지만 채워 주지 못한 것을 건수로 모읍니다. 입고와 정책을 정할 근거가 됩니다. 오른쪽 위에는 오늘 LLM 호출 수가 나옵니다.</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/screenshots/13-admin-transcript.png" alt="넘어온 건에서 대화 전체와 에이전트 논의를 펼친 화면">
+<p align="center"><b>넘어오기까지의 대화 전체</b><br>마지막 한 문장이 아니라 앞뒤 대화, 파악한 조건, 연락처, 내부 논의까지 한 번에 봅니다.</p>
 </td>
 </tr>
 </table>

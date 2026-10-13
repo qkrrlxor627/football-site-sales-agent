@@ -283,7 +283,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .act { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .act input { flex: 1 1 220px; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 7px 12px; background: var(--bg); font-size: 14px; }
 .filters { display: flex; gap: 6px; }
-.talk { margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.talk { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .talk li { max-width: 85%; padding: 7px 11px; border-radius: 4px 14px 14px 14px; background: var(--tile); overflow-wrap: anywhere; }
 .talk li.user { align-self: flex-end; border-radius: 14px 4px 14px 14px; background: var(--fg); color: var(--bg); }
 .demand { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
